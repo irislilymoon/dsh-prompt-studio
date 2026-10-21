@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "系统提示词工作室",
+    "description": "自定义初始系统提示词；可一键屏蔽 runtime 上下文、工具 schema、AGENTS.md 等注入，实现低 token 纯聊天。"
+  }
+}

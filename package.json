@@ -1,0 +1,72 @@
+{
+  "name": "dsh-prompt-studio",
+  "version": "0.2.0",
+  "description": "Custom initial system prompt and pure-chat injection suppression for DeepSeek Harness",
+  "author": "IrisLilyMoon",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/irislilymoon/dsh-prompt-studio.git"
+  },
+  "homepage": "https://github.com/irislilymoon/dsh-prompt-studio#readme",
+  "bugs": {
+    "url": "https://github.com/irislilymoon/dsh-prompt-studio/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "system-prompt",
+    "pure-chat",
+    "agents-md"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "check": "node --check index.js && node --check client.js",
+    "pack": "npm pack"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.2.1-alpha.2 <1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  }
+}
