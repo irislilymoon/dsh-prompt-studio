@@ -32,6 +32,7 @@ window.__ModuleLoader__.load({
     const NS = 'prompt-studio';
     const ROUTE = '/prompt-studio';
     const CHANGED_EVENT = 'dsh-prompt-studio:changed';
+    const MAX_CUSTOM_MODES = 20;
     let fallbackT = (key) => key;
     const sessionsHolder = { service: null };
     const themeHolder = { service: null, scheme: 'light', listeners: new Set() };
@@ -85,11 +86,9 @@ window.__ModuleLoader__.load({
     }
 
     const zh = {
-      nav: '提示词 / 纯聊天',
+      nav: '提示词 / 模式',
       title: '系统提示词工作室',
-      intro: '自定义初始系统提示词，并按需撤掉 DSH 注入的 runtime 上下文、工具 schema、AGENTS.md 与 skill 目录。纯聊天模式下，模型只看到你写的提示词和对话内容。',
-      promptTitle: '初始系统提示词',
-      promptHint: '「全量替换」会把整个系统提示词换成你写的正文，Agent Teams、工具指引等其他段全部去掉；「只替换开场白」只替换 DSH 默认的 Harness 身份和 coding persona，其他段保留。支持 {{model}} 占位符。',
+      intro: '自定义初始系统提示词，并按需撤掉 DSH 注入的 runtime 上下文、工具 schema、AGENTS.md 与 skill 目录。普通模式、仅聊天和自定义模式可以在输入框上方切换，新对话使用你设置的默认模式。',
       modeHost: '不覆盖',
       modeReplace: '只替换开场白',
       modeOnly: '全量替换',
@@ -106,17 +105,10 @@ window.__ModuleLoader__.load({
       defaultLoaded: '已载入 DSH 默认开场白，点击「保存设置」生效。',
       defaultFailed: '载入默认开场白失败',
       cleared: '已清空编辑区，点击「保存设置」生效。',
-      pureTitle: '纯聊天',
-      pureHint: '一键把系统提示词设为「全量替换」，并打开全部屏蔽开关。工具从第一条消息起就不会发送，首轮也按低 token 计费。建议用新会话开启纯聊天；已经调用过工具的会话切过来，可能因工具历史/声明不一致被服务端拒绝。',
-      pureOn: '一键纯聊天',
-      pureOff: '恢复系统输入',
-      pureActive: '纯聊天已开启：系统侧输入归零，只保留你写的提示词。',
-      pureInactive: '当前仍会发送部分系统侧输入。',
-      pureOnBadge: '已开启',
-      pureOffBadge: '未开启',
-      pureEmptyText: '提示词为空时，纯聊天的系统提示词也会是空的；模型只会看到对话内容。',
-      suppressTitle: '屏蔽系统侧输入',
-      suppressHint: '每个开关撤掉一类模型本来能看到的输入，可以单独使用。',
+      onlyPromptTitle: '仅聊天提示词',
+      onlyPromptBadge: '全量替换',
+      onlyPromptHint: '仅聊天模式只发送这段提示词，并屏蔽 runtime 上下文、工具 schema、AGENTS.md、时间等所有系统侧输入。',
+      onlyPromptEmpty: '提示词为空时，仅聊天不会发送任何系统提示词；模型只会看到对话内容。',
       swRuntime: '屏蔽 runtime 上下文',
       swRuntimeHint: '撤掉工作目录、沙箱/审批策略、skill 目录等 runtime 快照。插件会拦截整个快照投影，连 DSH 的必需工作目录上下文也不会发送。',
       swTools: '屏蔽工具 schema',
@@ -124,9 +116,9 @@ window.__ModuleLoader__.load({
       swInjected: '屏蔽 AGENTS.md / 时间等注入',
       swInjectedHint: '撤掉 workspace instructions（AGENTS.md / CLAUDE.md）、逐步时间读数、skill 目录与 /skill 调用内容。',
       swAll: '屏蔽所有非用户注入',
-      swAllHint: '用户角色里只要不是你自己发的消息就过滤掉，包括 plan-mode 提醒、goal/schedule 消息、session 引用等。这是最彻底的纯聊天。',
+      swAllHint: '用户角色里只要不是你自己发的消息就过滤掉，包括 plan-mode 提醒、goal/schedule 消息、session 引用等。这是最彻底的仅聊天。',
       swSafety: '工具基线保护',
-      swSafetyHint: 'DSH 要求会话有一份非空工具声明基线，否则之后重新打开工具可能被服务端拒绝。勾上后，会话首轮和声明序列重启时会保留完整工具一轮——首轮会多花约 9k token。纯聊天默认关闭。',
+      swSafetyHint: 'DSH 要求会话有一份非空工具声明基线，否则之后重新打开工具可能被服务端拒绝。勾上后，会话首轮和声明序列重启时会保留完整工具一轮——首轮会多花约 9k token。仅聊天默认关闭。',
       swSafetyCost: '首轮代价高；开启后首条消息不再是低 token。',
       save: '保存设置',
       saving: '保存中…',
@@ -134,21 +126,46 @@ window.__ModuleLoader__.load({
       saveFailed: '保存失败',
       unsaved: '有未保存的修改',
       savedHint: '没有未保存的修改',
-      sessionTitle: '当前会话',
-      sessionHint: '会话模式只影响这一个对话；设置页里的提示词与屏蔽开关是全局的。',
-      sessionNoSession: '打开一个对话后，这里可以单独设置该会话的模式。',
-      sessionMode: '会话模式',
-      modeGlobal: '跟随全局设置',
-      modePure: '纯聊天（仅本会话）',
-      modeNormal: '正常模式（仅本会话）',
-      modeGlobalHint: '使用设置页的全局配置',
-      modePureHint: '只用你的提示词 + 全部屏蔽',
-      modeNormalHint: '使用 DSH 默认提示词与工具',
-      globalBadge: '全局',
-      sessionBadge: '本会话',
-      sessionEffective: '本会话实际：{mode}；工具 {tools}；runtime {runtime}',
-      effectiveOn: '已屏蔽',
-      effectiveOff: '发送',
+      modePure: '仅聊天',
+      modeNormal: '普通模式',
+      modePureHint: '只发送仅聊天提示词 + 全部屏蔽',
+      modeNormalHint: '使用 DSH 默认提示词与完整工具',
+      defaultModeTitle: '新对话默认模式',
+      defaultModeHint: '新建对话会自动使用这个模式；已有对话可以在输入框上方单独切换，没有单独切换过的对话也会跟随这里。',
+      defaultModeLabel: '默认模式',
+      defaultModeEffective: '新对话当前使用：{mode}',
+      defaultModeSaved: '新对话默认模式已更新。',
+      defaultBadge: '默认',
+      customTitle: '自定义模式',
+      customHint: '把一套系统提示词、屏蔽开关和工具保护保存成可复用的模式，会出现在输入框上方的模式菜单里。',
+      customAdd: '新建模式',
+      customEmpty: '还没有自定义模式。',
+      customEdit: '编辑',
+      customDelete: '删除',
+      customBadge: '自定义',
+      customCount: '{n} 个',
+      customNewName: '自定义模式 {n}',
+      customEditorTitleNew: '新建自定义模式',
+      customEditorTitleEdit: '编辑自定义模式',
+      customName: '模式名称',
+      customNamePlaceholder: '例如：翻译助手',
+      customPromptTitle: '系统提示词',
+      customSave: '保存模式',
+      customCancel: '取消',
+      customDeleteConfirm: '删除自定义模式「{name}」？使用该模式的对话会回到默认模式。',
+      customSaved: '自定义模式已保存。',
+      customDeleted: '自定义模式已删除。',
+      customNameRequired: '请填写模式名称。',
+      customLimit: '最多 20 个自定义模式。',
+      customEmptyPrompt: '系统提示词为空时，这个模式不会发送提示词正文。',
+      customSummary: '{mode} · {suppress}',
+      customSuppressNone: '不屏蔽',
+      customSuppressList: '屏蔽 {list}',
+      sumRuntime: 'runtime',
+      sumTools: '工具',
+      sumInjected: '注入',
+      sumAll: '非用户注入',
+      sumSafety: '工具保护',
       diagTitle: '上一轮装配结果',
       diagEmpty: '在当前会话发一条消息后，这里会显示上一轮实际装配的段数、工具数和过滤数量。',
       diagSections: '系统提示词段数 {before} → {after}',
@@ -157,33 +174,24 @@ window.__ModuleLoader__.load({
       diagHeldNone: '工具保活：未触发',
       diagHeldFirst: '会话首轮保留完整工具',
       diagHeldRestart: '声明序列重启，保留完整工具一轮',
+      diagSeriesRestarted: '请求序列：本轮已重开，系统提示词按当前模式重建',
       diagStripped: '过滤注入消息 {count} 条',
       diagKinds: '（{kinds}）',
       diagPath: '数据文件',
       diagCounters: '进程累计：装配 {assemblies} 次 · 过滤 {stripped} 条 · 保活 {held} 轮',
-      diagNone: '无',
       loading: '读取设置…',
       retry: '重试',
       loadFailed: '读取设置失败',
       storeWarning: '设置文件读取有问题：{error}',
       dockLabel: '提示词',
-      dockHint: '只影响本会话：跟随全局 / 纯聊天 / 正常模式',
-      dockPure: '纯聊天',
-      pureBadge: '纯聊天',
-      normalBadge: '正常',
-      globalBadgeShort: '全局',
-      toolsOn: '工具开',
-      toolsOff: '工具关',
-      runtimeOn: 'runtime 开',
-      runtimeOff: 'runtime 关',
+      dockHint: '只影响当前对话：普通模式 / 仅聊天 / 自定义模式',
+      pureBadge: '仅聊天',
     };
 
     const en = {
-      nav: 'Prompt / pure chat',
+      nav: 'Prompt / modes',
       title: 'Prompt Studio',
-      intro: 'Edit the initial system prompt and optionally remove runtime context, tool schemas, AGENTS.md and skill catalogs injected by DSH. In pure chat the model sees only your prompt and the conversation.',
-      promptTitle: 'Initial system prompt',
-      promptHint: '"Replace whole prompt" replaces the entire system prompt with your text and drops Agent Teams, tool guidance and every other section. "Replace opener only" changes just the DSH Harness identity and coding persona and keeps the rest. {{model}} is supported.',
+      intro: 'Edit the initial system prompt and optionally remove runtime context, tool schemas, AGENTS.md and skill catalogs injected by DSH. Switch between normal mode, chat only and custom modes above the composer; new chats use your default mode.',
       modeHost: 'Do not override',
       modeReplace: 'Replace opener only',
       modeOnly: 'Replace whole prompt',
@@ -200,17 +208,10 @@ window.__ModuleLoader__.load({
       defaultLoaded: 'Default opener loaded. Click Save settings to apply.',
       defaultFailed: 'Could not load the default opener',
       cleared: 'Editor cleared. Click Save settings to apply.',
-      pureTitle: 'Pure chat',
-      pureHint: 'Sets the system prompt to "Replace whole prompt" and turns on every suppression switch. Tools are not sent from the first message, so even the first turn is cheap. Prefer a new conversation for pure chat; switching an existing tool-using conversation may be rejected because its tool history and declaration baseline no longer line up.',
-      pureOn: 'Make it pure chat',
-      pureOff: 'Restore system input',
-      pureActive: 'Pure chat is on: zero system-side input, only your prompt remains.',
-      pureInactive: 'Some system-side input is still being sent.',
-      pureOnBadge: 'On',
-      pureOffBadge: 'Off',
-      pureEmptyText: 'With an empty prompt, pure chat sends an empty system prompt; the model sees only the conversation.',
-      suppressTitle: 'Suppress system-side input',
-      suppressHint: 'Each switch removes one class of model-visible input and can be used independently.',
+      onlyPromptTitle: 'Chat-only prompt',
+      onlyPromptBadge: 'Replace whole prompt',
+      onlyPromptHint: 'Chat only sends exactly this prompt and suppresses runtime context, tool schemas, AGENTS.md, time readings and every other system-side input.',
+      onlyPromptEmpty: 'With an empty prompt, chat only sends no system prompt at all; the model sees only the conversation.',
       swRuntime: 'Suppress runtime context',
       swRuntimeHint: 'Removes runtime snapshots: working directory, sandbox/approval policies, skill catalog. The plugin intercepts the whole projection, including DSH mandatory working-directory context.',
       swTools: 'Suppress tool schemas',
@@ -218,9 +219,9 @@ window.__ModuleLoader__.load({
       swInjected: 'Suppress AGENTS.md / time injections',
       swInjectedHint: 'Removes workspace instructions (AGENTS.md / CLAUDE.md), per-step time readings, skill catalogs and /skill content.',
       swAll: 'Suppress every non-user injection',
-      swAllHint: 'Drops every user-role message you did not send yourself, including plan-mode reminders, goal/schedule messages and session references. This is the most thorough pure chat.',
+      swAllHint: 'Drops every user-role message you did not send yourself, including plan-mode reminders, goal/schedule messages and session references. This is the most thorough chat-only setup.',
       swSafety: 'Tool baseline protection',
-      swSafetyHint: 'DSH expects a non-empty tool-declaration baseline; without one, re-enabling tools later in the same session may be rejected. When checked, the full tool list is kept for the session\u2019s first request and after a declaration-series restart \u2014 about 9k extra tokens on that turn. Off by default for pure chat.',
+      swSafetyHint: 'DSH expects a non-empty tool-declaration baseline; without one, re-enabling tools later in the same session may be rejected. When checked, the full tool list is kept for the session\u2019s first request and after a declaration-series restart \u2014 about 9k extra tokens on that turn. Off by default for chat only.',
       swSafetyCost: 'Costly first turn; the first message is no longer low-token.',
       save: 'Save settings',
       saving: 'Saving\u2026',
@@ -228,21 +229,46 @@ window.__ModuleLoader__.load({
       saveFailed: 'Save failed',
       unsaved: 'Unsaved changes',
       savedHint: 'No unsaved changes',
-      sessionTitle: 'Current conversation',
-      sessionHint: 'The conversation mode applies to this chat only; the prompt and switches above are global.',
-      sessionNoSession: 'Open a conversation to set a mode for it.',
-      sessionMode: 'Conversation mode',
-      modeGlobal: 'Follow global settings',
-      modePure: 'Pure chat (this chat only)',
-      modeNormal: 'Normal mode (this chat only)',
-      modeGlobalHint: 'Use the global settings above',
-      modePureHint: 'Only your prompt; all input suppressed',
-      modeNormalHint: 'DSH default prompt and tools',
-      globalBadge: 'Global',
-      sessionBadge: 'This chat',
-      sessionEffective: 'Effective here: {mode}; tools {tools}; runtime {runtime}',
-      effectiveOn: 'off',
-      effectiveOff: 'sent',
+      modePure: 'Chat only',
+      modeNormal: 'Normal mode',
+      modePureHint: 'Send only the chat-only prompt + suppress all system input',
+      modeNormalHint: 'DSH default prompt and full tools',
+      defaultModeTitle: 'Default mode for new chats',
+      defaultModeHint: 'New chats start in this mode. Existing chats can switch from the prompt row above the composer; chats without their own choice also follow this setting.',
+      defaultModeLabel: 'Default mode',
+      defaultModeEffective: 'New chats currently use: {mode}',
+      defaultModeSaved: 'Default mode for new chats updated.',
+      defaultBadge: 'Default',
+      customTitle: 'Custom modes',
+      customHint: 'Save a system prompt, suppression switches and tool protection as a reusable mode. It appears in the mode menu above the composer.',
+      customAdd: 'New mode',
+      customEmpty: 'No custom modes yet.',
+      customEdit: 'Edit',
+      customDelete: 'Delete',
+      customBadge: 'Custom',
+      customCount: '{n}',
+      customNewName: 'Custom mode {n}',
+      customEditorTitleNew: 'New custom mode',
+      customEditorTitleEdit: 'Edit custom mode',
+      customName: 'Mode name',
+      customNamePlaceholder: 'e.g. Translation assistant',
+      customPromptTitle: 'System prompt',
+      customSave: 'Save mode',
+      customCancel: 'Cancel',
+      customDeleteConfirm: 'Delete custom mode "{name}"? Chats using it will fall back to the default mode.',
+      customSaved: 'Custom mode saved.',
+      customDeleted: 'Custom mode deleted.',
+      customNameRequired: 'Enter a mode name.',
+      customLimit: 'Up to 20 custom modes.',
+      customEmptyPrompt: 'With an empty system prompt, this mode sends no prompt text.',
+      customSummary: '{mode} \u00b7 {suppress}',
+      customSuppressNone: 'no suppression',
+      customSuppressList: 'suppress {list}',
+      sumRuntime: 'runtime',
+      sumTools: 'tools',
+      sumInjected: 'injections',
+      sumAll: 'non-user input',
+      sumSafety: 'tool hold',
       diagTitle: 'Last assembly',
       diagEmpty: 'Send a message in the current conversation to see how many sections, tools and injected messages the last turn actually had.',
       diagSections: 'System prompt sections {before} \u2192 {after}',
@@ -251,25 +277,18 @@ window.__ModuleLoader__.load({
       diagHeldNone: 'Tool hold: not triggered',
       diagHeldFirst: 'full tools kept on the session\u2019s first request',
       diagHeldRestart: 'full tools kept for one turn after a series restart',
+      diagSeriesRestarted: 'Request series: restarted this turn; system prompt rebuilt for the current mode',
       diagStripped: 'Injected messages filtered: {count}',
       diagKinds: ' ({kinds})',
       diagPath: 'Data file',
       diagCounters: 'Process totals: {assemblies} assemblies \u00b7 {stripped} filtered \u00b7 {held} held turns',
-      diagNone: 'none',
       loading: 'Reading settings\u2026',
       retry: 'Retry',
       loadFailed: 'Could not read settings',
       storeWarning: 'The settings file has a problem: {error}',
       dockLabel: 'Prompt',
-      dockHint: 'This chat only: follow global / pure chat / normal',
-      dockPure: 'Pure chat',
-      pureBadge: 'Pure chat',
-      normalBadge: 'Normal',
-      globalBadgeShort: 'Global',
-      toolsOn: 'tools on',
-      toolsOff: 'tools off',
-      runtimeOn: 'runtime on',
-      runtimeOff: 'runtime off',
+      dockHint: 'This chat only: normal / chat only / custom modes',
+      pureBadge: 'Chat only',
     };
 
     function tOf(props) {
@@ -278,6 +297,48 @@ window.__ModuleLoader__.load({
 
     function fmt(template, vars) {
       return String(template ?? '').replace(/\{(\w+)\}/g, (_, key) => String(vars?.[key] ?? ''));
+    }
+
+    function promptModeLabel(promptMode, t) {
+      if (promptMode === 'host') return t('modeHost');
+      if (promptMode === 'replace') return t('modeReplace');
+      return t('modeOnly');
+    }
+
+    function suppressSummary(suppress, t) {
+      const labels = [];
+      if (suppress?.runtime === true) labels.push(t('sumRuntime'));
+      if (suppress?.tools === true) labels.push(t('sumTools'));
+      if (suppress?.injected === true) labels.push(t('sumInjected'));
+      if (suppress?.all === true) labels.push(t('sumAll'));
+      return labels.length === 0
+        ? t('customSuppressNone')
+        : fmt(t('customSuppressList'), { list: labels.join(' / ') });
+    }
+
+    function customModeSummary(mode, t) {
+      const base = fmt(t('customSummary'), {
+        mode: promptModeLabel(mode.promptMode, t),
+        suppress: suppressSummary(mode.suppress, t),
+      });
+      return mode.toolSafety === true ? `${base} · ${t('sumSafety')}` : base;
+    }
+
+    function buildModeItems(t, config) {
+      const items = [
+        { value: 'normal', label: t('modeNormal'), hint: t('modeNormalHint'), dot: '#2f7cf6' },
+        { value: 'pure', label: t('modePure'), hint: t('modePureHint'), dot: '#19b8a6' },
+      ];
+      const modes = Array.isArray(config?.modes) ? config.modes : [];
+      for (const mode of modes) {
+        items.push({
+          value: `custom:${mode.id}`,
+          label: mode.name,
+          hint: customModeSummary(mode, t),
+          dot: '#a855f7',
+        });
+      }
+      return items;
     }
 
     function ActionButton(props) {
@@ -461,6 +522,15 @@ window.__ModuleLoader__.load({
         textareaFocus: {
           borderColor: dark ? '#4d93f8' : '#4176e6',
         },
+        input: {
+          background: dark ? '#232324' : '#ffffff',
+          color: dark ? '#f5f6f7' : '#0f1115',
+          border: `0.5px solid ${dark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.16)'}`,
+          colorScheme: dark ? 'dark' : 'light',
+        },
+        inputFocus: {
+          borderColor: dark ? '#4d93f8' : '#4176e6',
+        },
         fallbackSelect: {
           background: dark ? '#232324' : '#ffffff',
           color: dark ? '#f5f6f7' : '#0f1115',
@@ -532,6 +602,51 @@ window.__ModuleLoader__.load({
         width: '100%',
         outline: 'none',
       },
+      input: {
+        font: 'inherit',
+        fontSize: 13,
+        height: 32,
+        padding: '0 10px',
+        borderRadius: 8,
+        boxSizing: 'border-box',
+        width: '100%',
+        outline: 'none',
+      },
+      modeList: { display: 'flex', flexDirection: 'column' },
+      modeRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '9px 0',
+        borderTop: '0.5px solid var(--dsw-alias-border-l1, rgba(127,127,127,0.18))',
+      },
+      modeNameRow: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
+      modeName: {
+        fontSize: 13,
+        fontWeight: 600,
+        lineHeight: '20px',
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      modeSummary: {
+        fontSize: 12,
+        lineHeight: '18px',
+        color: 'var(--dsw-alias-label-secondary, #61666b)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      editor: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+        padding: 12,
+        borderRadius: 8,
+        border: '0.5px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.28))',
+        background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,0.04))',
+      },
       switchRow: { display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 13, lineHeight: '20px' },
       switchText: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 },
       switchLabel: { fontWeight: 500 },
@@ -593,7 +708,11 @@ window.__ModuleLoader__.load({
         width: 7,
         height: 7,
         borderRadius: '50%',
-        background: mode === 'pure' ? '#19b8a6' : mode === 'normal' ? 'rgba(150,150,150,0.8)' : '#2f7cf6',
+        background: String(mode ?? '').startsWith('custom:')
+          ? '#a855f7'
+          : mode === 'pure'
+            ? '#19b8a6'
+            : '#2f7cf6',
         flex: 'none',
       }),
     };
@@ -624,20 +743,18 @@ window.__ModuleLoader__.load({
       );
     }
 
-    const MODE_ITEMS = [
-      { value: 'global', labelKey: 'modeGlobal', hintKey: 'modeGlobalHint', dot: '#2f7cf6' },
-      { value: 'pure', labelKey: 'modePure', hintKey: 'modePureHint', dot: '#19b8a6' },
-      { value: 'normal', labelKey: 'modeNormal', hintKey: 'modeNormalHint', dot: 'rgba(150,150,150,0.8)' },
-    ];
-
     function ModeMenu(props) {
       const t = tOf(props);
-      const value = MODE_ITEMS.some((item) => item.value === props.value) ? props.value : 'global';
-      const disabled = props.disabled === true;
+      const items = Array.isArray(props.items) ? props.items : [];
+      const value = items.some((item) => item.value === props.value)
+        ? props.value
+        : (items[0]?.value ?? '');
+      const disabled = props.disabled === true || items.length === 0;
       const [open, setOpen] = React.useState(false);
-      const selected = MODE_ITEMS.find((item) => item.value === value) ?? MODE_ITEMS[0];
-      const label = t(selected.labelKey);
-      const title = props.title ?? t('dockHint');
+      const selected = items.find((item) => item.value === value) ?? items[0];
+      const label = selected?.displayLabel ?? selected?.label ?? '';
+      const title = props.title ?? selected?.hint ?? t('dockHint');
+      if (items.length === 0) return null;
       const toggle = () => {
         if (!disabled) setOpen((previous) => !previous);
       };
@@ -651,7 +768,7 @@ window.__ModuleLoader__.load({
               disabled,
               'aria-haspopup': 'menu',
               'aria-expanded': open ? 'true' : 'false',
-              'aria-label': `${t('sessionMode')}: ${label}`,
+              'aria-label': `${t('dockLabel')}: ${label}`,
               title,
               'data-mode-menu-trigger': props.dataName ?? '1',
               onClick: toggle,
@@ -667,7 +784,7 @@ window.__ModuleLoader__.load({
               style: S.button,
               'aria-haspopup': 'menu',
               'aria-expanded': open ? 'true' : 'false',
-              'aria-label': `${t('sessionMode')}: ${label}`,
+              'aria-label': `${t('dockLabel')}: ${label}`,
               title,
               'data-mode-menu-trigger': props.dataName ?? '1',
               onClick: toggle,
@@ -691,20 +808,20 @@ window.__ModuleLoader__.load({
               if (next !== value) props.onChange?.(next);
             },
           },
-          MODE_ITEMS.map((item) => h('option', { key: item.value, value: item.value }, t(item.labelKey))),
+          items.map((item) => h('option', { key: item.value, value: item.value }, item.label)),
         );
       }
 
-      const items = MODE_ITEMS.map((item) => ({
+      const menuItems = items.map((item) => ({
         id: item.value,
-        label: t(item.labelKey),
+        label: item.label,
         icon: h('span', { style: { ...S.menuDot, background: item.dot }, 'aria-hidden': 'true' }),
         disabled,
       }));
       return h(HostMenu, {
         open,
         anchor,
-        items,
+        items: menuItems,
         selectedId: value,
         onSelect: (id) => {
           setOpen(false);
@@ -728,7 +845,10 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState('');
       const [notice, setNotice] = React.useState('');
       const [saving, setSaving] = React.useState(false);
-      const [sessionBusy, setSessionBusy] = React.useState(false);
+      const [defaultBusy, setDefaultBusy] = React.useState(false);
+      const [modeBusy, setModeBusy] = React.useState(false);
+      const [editor, setEditor] = React.useState(null);
+      const [editorFocus, setEditorFocus] = React.useState('');
       const [promptFocus, setPromptFocus] = React.useState(false);
       const rootRef = React.useRef(null);
       const scheme = useThemeScheme();
@@ -786,7 +906,7 @@ window.__ModuleLoader__.load({
           const payload = await api(`/settings${stateQuery(mainSessionId)}`, {
             method: 'PUT',
             body: JSON.stringify({
-              prompt: nextDraft.prompt,
+              prompt: { mode: 'only', text: nextDraft.prompt.text },
               suppress: nextDraft.suppress,
               toolSafety: nextDraft.toolSafety,
             }),
@@ -806,24 +926,6 @@ window.__ModuleLoader__.load({
         }
       };
 
-      const makePure = () => {
-        if (draft === null) return;
-        persist({
-          prompt: { mode: 'only', text: draft.prompt.text },
-          suppress: { runtime: true, tools: true, injected: true, all: true },
-          toolSafety: false,
-        }, t('pureActive'));
-      };
-
-      const restoreSystem = () => {
-        if (draft === null) return;
-        persist({
-          prompt: { mode: 'host', text: draft.prompt.text },
-          suppress: { runtime: false, tools: false, injected: false, all: false },
-          toolSafety: false,
-        }, t('saved'));
-      };
-
       const loadDefault = async () => {
         if (draft === null) return;
         if (draft.prompt.text.trim() !== '' && typeof window !== 'undefined' && typeof window.confirm === 'function') {
@@ -832,8 +934,8 @@ window.__ModuleLoader__.load({
         try {
           const payload = await api(`/default-prompt${stateQuery(mainSessionId)}`);
           update((next) => {
+            next.prompt.mode = 'only';
             next.prompt.text = typeof payload.text === 'string' ? payload.text : '';
-            if (next.prompt.mode === 'host') next.prompt.mode = 'replace';
           });
           setNotice(t('defaultLoaded'));
         } catch (problem) {
@@ -852,22 +954,279 @@ window.__ModuleLoader__.load({
         setNotice(t('cleared'));
       };
 
-      const changeSessionMode = async (mode) => {
-        if (mainSessionId === '') return;
-        setSessionBusy(true);
+      const saveDefaultMode = async (mode) => {
+        if (mode === '' || mode === data?.config?.defaultMode) return;
+        setDefaultBusy(true);
         setError('');
         try {
-          const payload = await api('/session', {
+          const payload = await api(`/settings${stateQuery(mainSessionId)}`, {
             method: 'PUT',
-            body: JSON.stringify({ sessionId: mainSessionId, mode }),
+            body: JSON.stringify({ defaultMode: mode }),
           });
           setData(payload);
+          setNotice(t('defaultModeSaved'));
           notifyChanged();
         } catch (problem) {
           setError(`${t('saveFailed')}：${problem?.message ?? String(problem)}`);
         } finally {
-          setSessionBusy(false);
+          setDefaultBusy(false);
         }
+      };
+
+      const openCreateMode = () => {
+        if (draft === null) return;
+        const count = Array.isArray(data?.config?.modes) ? data.config.modes.length : 0;
+        setEditor({
+          id: '',
+          name: fmt(t('customNewName'), { n: count + 1 }),
+          promptMode: 'only',
+          promptText: draft.prompt.text,
+          suppress: { runtime: false, tools: false, injected: false, all: false },
+          toolSafety: false,
+        });
+        setEditorFocus('');
+        setError('');
+        setNotice('');
+      };
+
+      const openEditMode = (mode) => {
+        setEditor({
+          id: mode.id,
+          name: mode.name,
+          promptMode: mode.promptMode,
+          promptText: mode.promptText,
+          suppress: { ...mode.suppress },
+          toolSafety: mode.toolSafety === true,
+        });
+        setEditorFocus('');
+        setError('');
+        setNotice('');
+      };
+
+      const updateEditor = (mutator) => {
+        setEditor((previous) => {
+          if (previous === null) return previous;
+          const next = { ...previous, suppress: { ...previous.suppress } };
+          mutator(next);
+          return next;
+        });
+        setNotice('');
+      };
+
+      const saveEditor = async () => {
+        if (editor === null || modeBusy) return;
+        if (editor.name.trim() === '') {
+          setError(t('customNameRequired'));
+          return;
+        }
+        setModeBusy(true);
+        setError('');
+        try {
+          const query = stateQuery(mainSessionId);
+          const path = editor.id === ''
+            ? `/modes${query}`
+            : `/modes/${encodeURIComponent(editor.id)}${query}`;
+          const payload = await api(path, {
+            method: editor.id === '' ? 'POST' : 'PUT',
+            body: JSON.stringify({
+              name: editor.name,
+              promptMode: editor.promptMode,
+              promptText: editor.promptText,
+              suppress: editor.suppress,
+              toolSafety: editor.toolSafety,
+            }),
+          });
+          setData(payload);
+          setEditor(null);
+          setEditorFocus('');
+          setNotice(t('customSaved'));
+          notifyChanged();
+        } catch (problem) {
+          setError(`${t('saveFailed')}：${problem?.message ?? String(problem)}`);
+        } finally {
+          setModeBusy(false);
+        }
+      };
+
+      const deleteMode = async (mode) => {
+        if (modeBusy) return;
+        if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+          if (window.confirm(fmt(t('customDeleteConfirm'), { name: mode.name })) !== true) return;
+        }
+        setModeBusy(true);
+        setError('');
+        try {
+          const payload = await api(`/modes/${encodeURIComponent(mode.id)}${stateQuery(mainSessionId)}`, {
+            method: 'DELETE',
+          });
+          setData(payload);
+          if (editor !== null && editor.id === mode.id) setEditor(null);
+          setNotice(t('customDeleted'));
+          notifyChanged();
+        } catch (problem) {
+          setError(`${t('saveFailed')}：${problem?.message ?? String(problem)}`);
+        } finally {
+          setModeBusy(false);
+        }
+      };
+
+      const renderEditor = () => {
+        if (editor === null) return null;
+        const promptHint = editor.promptMode === 'only'
+          ? t('modeOnlyHint')
+          : editor.promptMode === 'replace'
+            ? t('modeReplaceHint')
+            : t('modeHostHint');
+        const promptModes = [
+          { value: 'host', label: t('modeHost') },
+          { value: 'only', label: t('modeOnly') },
+          { value: 'replace', label: t('modeReplace') },
+        ];
+        return h(
+          'div',
+          { style: S.editor, 'data-mode-editor': editor.id === '' ? 'new' : editor.id },
+          h('h4', { style: { ...S.h3, margin: 0 } }, editor.id === '' ? t('customEditorTitleNew') : t('customEditorTitleEdit')),
+          h(
+            'div',
+            { style: S.switchText },
+            h('span', { style: S.switchLabel }, t('customName')),
+            h('input', {
+              style: {
+                ...S.input,
+                ...themeStyles.input,
+                ...(editorFocus === 'name' ? themeStyles.inputFocus : {}),
+              },
+              value: editor.name,
+              placeholder: t('customNamePlaceholder'),
+              maxLength: 60,
+              spellCheck: false,
+              onFocus: () => setEditorFocus('name'),
+              onBlur: () => setEditorFocus(''),
+              onChange: (event) => updateEditor((next) => {
+                next.name = event.target.value;
+              }),
+              'data-mode-name': '1',
+            }),
+          ),
+          h(
+            'div',
+            { style: S.switchText },
+            h('span', { style: S.switchLabel }, t('customPromptTitle')),
+            HostSegmentedControl !== null
+              ? h(HostSegmentedControl, {
+                  id: 'prompt-studio-custom-prompt-mode',
+                  value: editor.promptMode,
+                  options: promptModes,
+                  onChange: (value) => updateEditor((next) => {
+                    next.promptMode = value;
+                  }),
+                  label: t('customPromptTitle'),
+                  className: themeStyles.segClass,
+                })
+              : h(
+                  'select',
+                  {
+                    style: { ...S.fallbackSelect, ...themeStyles.fallbackSelect },
+                    value: editor.promptMode,
+                    onChange: (event) => updateEditor((next) => {
+                      next.promptMode = event.target.value;
+                    }),
+                  },
+                  promptModes.map((item) => h('option', { key: item.value, value: item.value }, item.label)),
+                ),
+            h('span', { style: S.switchHint }, promptHint),
+          ),
+          h('textarea', {
+            style: {
+              ...S.textarea,
+              ...themeStyles.textarea,
+              minHeight: 140,
+              ...(editorFocus === 'prompt' ? themeStyles.textareaFocus : {}),
+            },
+            value: editor.promptText,
+            placeholder: t('promptPlaceholder'),
+            spellCheck: false,
+            disabled: editor.promptMode === 'host',
+            onFocus: () => setEditorFocus('prompt'),
+            onBlur: () => setEditorFocus(''),
+            onChange: (event) => updateEditor((next) => {
+              next.promptText = event.target.value;
+            }),
+            'data-mode-prompt': '1',
+          }),
+          h(
+            'div',
+            { style: S.row },
+            h('span', { style: S.mono }, fmt(t('chars'), { n: editor.promptText.length })),
+            editor.promptMode !== 'host' && editor.promptText.trim() === ''
+              ? h('span', { style: S.switchCost }, t('customEmptyPrompt'))
+              : null,
+          ),
+          h(Toggle, {
+            id: 'custom-runtime',
+            checked: editor.suppress.runtime,
+            label: t('swRuntime'),
+            hint: t('swRuntimeHint'),
+            onChange: (value) => updateEditor((next) => {
+              next.suppress.runtime = value;
+            }),
+          }),
+          h(Toggle, {
+            id: 'custom-tools',
+            checked: editor.suppress.tools,
+            label: t('swTools'),
+            hint: t('swToolsHint'),
+            onChange: (value) => updateEditor((next) => {
+              next.suppress.tools = value;
+            }),
+          }),
+          h(Toggle, {
+            id: 'custom-injected',
+            checked: editor.suppress.injected,
+            label: t('swInjected'),
+            hint: t('swInjectedHint'),
+            onChange: (value) => updateEditor((next) => {
+              next.suppress.injected = value;
+            }),
+          }),
+          h(Toggle, {
+            id: 'custom-all',
+            checked: editor.suppress.all,
+            label: t('swAll'),
+            hint: t('swAllHint'),
+            onChange: (value) => updateEditor((next) => {
+              next.suppress.all = value;
+            }),
+          }),
+          h(Toggle, {
+            id: 'custom-toolSafety',
+            checked: editor.toolSafety,
+            disabled: !editor.suppress.tools,
+            label: t('swSafety'),
+            hint: t('swSafetyHint'),
+            cost: editor.toolSafety ? t('swSafetyCost') : '',
+            onChange: (value) => updateEditor((next) => {
+              next.toolSafety = value;
+            }),
+          }),
+          h(
+            'div',
+            { style: S.row },
+            h(ActionButton, { variant: 'primary', onClick: saveEditor, disabled: modeBusy }, modeBusy ? t('saving') : t('customSave')),
+            h(
+              ActionButton,
+              {
+                variant: 'ghost',
+                disabled: modeBusy,
+                onClick: () => {
+                  setEditor(null);
+                  setEditorFocus('');
+                },
+              },
+              t('customCancel'),
+            ),
+          ),
+        );
       };
 
       if (status === 'loading' && data === null) {
@@ -884,18 +1243,16 @@ window.__ModuleLoader__.load({
       }
       if (data === null || draft === null) return null;
 
-      const effective = data.session?.effective;
-      const sessionMode = data.session?.mode ?? 'global';
       const last = data.last;
-      const effectiveModeLabel = effective?.promptMode === 'only'
-        ? t('modeOnly')
-        : effective?.promptMode === 'replace'
-          ? t('modeReplace')
-          : t('modeHost');
+      const config = data.config ?? {};
+      const modes = Array.isArray(config.modes) ? config.modes : [];
+      const defaultMode = typeof config.defaultMode === 'string' ? config.defaultMode : 'normal';
+      const modeItems = buildModeItems(t, config);
+      const defaultLabel = modeItems.find((item) => item.value === defaultMode)?.label ?? t('modeNormal');
 
       return h(
         'div',
-        { ref: rootRef, style: pageStyle, 'data-plugin': 'dsh-prompt-studio', 'data-pure-chat': data.pureChat === true ? '1' : '0' },
+        { ref: rootRef, style: pageStyle, 'data-plugin': 'dsh-prompt-studio' },
         h('style', null, SEGMENT_CSS),
         h('h2', { style: S.h2 }, t('title')),
         h('p', { style: S.sub }, t('intro')),
@@ -909,54 +1266,15 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: S.row },
-            h('h3', { style: S.h3 }, t('promptTitle')),
-            h('span', { style: { ...S.badge, ...S.badgeBlue } }, t('globalBadge')),
+            h('h3', { style: S.h3 }, t('onlyPromptTitle')),
+            h('span', { style: { ...S.badge, ...S.badgeBlue } }, t('onlyPromptBadge')),
           ),
-          h('p', { style: S.sub }, t('promptHint')),
-          HostSegmentedControl !== null
-            ? h(HostSegmentedControl, {
-                id: 'prompt-studio-mode',
-                value: draft.prompt.mode,
-                options: [
-                  { value: 'host', label: t('modeHost') },
-                  { value: 'only', label: t('modeOnly') },
-                  { value: 'replace', label: t('modeReplace') },
-                ],
-                onChange: (mode) => update((next) => {
-                  next.prompt.mode = mode;
-                }),
-                label: t('promptTitle'),
-                className: themeStyles.segClass,
-              })
-            : h(
-                'select',
-                {
-                  style: { ...S.fallbackSelect, ...themeStyles.fallbackSelect },
-                  value: draft.prompt.mode,
-                  onChange: (event) => update((next) => {
-                    next.prompt.mode = event.target.value;
-                  }),
-                  'data-prompt-mode': '1',
-                },
-                h('option', { value: 'host' }, t('modeHost')),
-                h('option', { value: 'only' }, t('modeOnly')),
-                h('option', { value: 'replace' }, t('modeReplace')),
-              ),
-          h(
-            'p',
-            { style: S.sub },
-            draft.prompt.mode === 'only'
-              ? t('modeOnlyHint')
-              : draft.prompt.mode === 'replace'
-                ? t('modeReplaceHint')
-                : t('modeHostHint'),
-          ),
+          h('p', { style: S.sub }, t('onlyPromptHint')),
           h('textarea', {
             style: { ...S.textarea, ...themeStyles.textarea, ...(promptFocus ? themeStyles.textareaFocus : {}) },
             value: draft.prompt.text,
             placeholder: t('promptPlaceholder'),
             spellCheck: false,
-            disabled: draft.prompt.mode === 'host',
             onFocus: () => setPromptFocus(true),
             onBlur: () => setPromptFocus(false),
             onChange: (event) => update((next) => {
@@ -972,11 +1290,8 @@ window.__ModuleLoader__.load({
             h('span', { style: S.mono }, fmt(t('chars'), { n: draft.prompt.text.length })),
           ),
           h('p', { style: S.sub }, t('modelTokenHint')),
-          draft.prompt.mode === 'only' && draft.prompt.text.trim() === ''
-            ? h('p', { style: S.warn }, t('pureEmptyText'))
-            : null,
-          draft.prompt.mode === 'replace' && draft.prompt.text.trim() === ''
-            ? h('p', { style: S.warn }, t('pureEmptyText'))
+          draft.prompt.text.trim() === ''
+            ? h('p', { style: S.warn }, t('onlyPromptEmpty'))
             : null,
         ),
 
@@ -986,107 +1301,79 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: S.row },
-            h('h3', { style: S.h3 }, t('pureTitle')),
-            h('span', { style: { ...S.badge, ...(data.pureChat === true ? S.badgeGreen : {}) } }, data.pureChat === true ? t('pureOnBadge') : t('pureOffBadge')),
+            h('h3', { style: S.h3 }, t('customTitle')),
+            h('span', { style: S.badge }, fmt(t('customCount'), { n: modes.length })),
           ),
-          h('p', { style: S.sub }, data.pureChat === true ? t('pureActive') : t('pureInactive')),
-          h('p', { style: S.sub }, t('pureHint')),
-          h(
-            'div',
-            { style: S.row },
-            h(ActionButton, { variant: 'primary', onClick: makePure, disabled: saving }, t('pureOn')),
-            h(ActionButton, { variant: 'outline', onClick: restoreSystem, disabled: saving }, t('pureOff')),
-          ),
-        ),
-
-        h(
-          'section',
-          { style: cardStyle },
-          h('h3', { style: S.h3 }, t('suppressTitle')),
-          h('p', { style: S.sub }, t('suppressHint')),
-          h(Toggle, {
-            id: 'runtime',
-            checked: draft.suppress.runtime,
-            label: t('swRuntime'),
-            hint: t('swRuntimeHint'),
-            onChange: (value) => update((next) => {
-              next.suppress.runtime = value;
-            }),
-          }),
-          h(Toggle, {
-            id: 'tools',
-            checked: draft.suppress.tools,
-            label: t('swTools'),
-            hint: t('swToolsHint'),
-            onChange: (value) => update((next) => {
-              next.suppress.tools = value;
-            }),
-          }),
-          h(Toggle, {
-            id: 'injected',
-            checked: draft.suppress.injected,
-            label: t('swInjected'),
-            hint: t('swInjectedHint'),
-            onChange: (value) => update((next) => {
-              next.suppress.injected = value;
-            }),
-          }),
-          h(Toggle, {
-            id: 'all',
-            checked: draft.suppress.all,
-            label: t('swAll'),
-            hint: t('swAllHint'),
-            onChange: (value) => update((next) => {
-              next.suppress.all = value;
-            }),
-          }),
-          h(Toggle, {
-            id: 'toolSafety',
-            checked: draft.toolSafety,
-            disabled: !draft.suppress.tools,
-            label: t('swSafety'),
-            hint: t('swSafetyHint'),
-            cost: draft.toolSafety ? t('swSafetyCost') : '',
-            onChange: (value) => update((next) => {
-              next.toolSafety = value;
-            }),
-          }),
-        ),
-
-        h(
-          'section',
-          { style: cardStyle },
-          h(
-            'div',
-            { style: S.row },
-            h('h3', { style: S.h3 }, t('sessionTitle')),
-            h('span', { style: S.badge }, t('sessionBadge')),
-          ),
-          h('p', { style: S.sub }, t('sessionHint')),
-          mainSessionId === ''
-            ? h('p', { style: S.sub }, t('sessionNoSession'))
+          h('p', { style: S.sub }, t('customHint')),
+          modes.length === 0
+            ? h('p', { style: S.sub }, t('customEmpty'))
             : h(
                 'div',
-                { style: S.row },
-                h('span', { style: S.sub }, t('sessionMode')),
-                h(ModeMenu, {
-                  t,
-                  value: sessionMode,
-                  disabled: sessionBusy,
-                  onChange: changeSessionMode,
-                  title: t('sessionHint'),
-                  dataName: 'settings',
-                  side: 'top',
-                  triggerVariant: 'outline',
-                }),
+                { style: S.modeList },
+                modes.map((mode) => h(
+                  'div',
+                  { key: mode.id, style: S.modeRow, 'data-custom-mode': mode.id },
+                  h('span', { style: { ...S.menuDot, background: '#a855f7' }, 'aria-hidden': 'true' }),
+                  h(
+                    'div',
+                    { style: S.grow },
+                    h(
+                      'div',
+                      { style: S.modeNameRow },
+                      h('span', { style: S.modeName }, mode.name),
+                      h('span', { style: S.badge }, t('customBadge')),
+                    ),
+                    h('span', { style: S.modeSummary }, customModeSummary(mode, t)),
+                  ),
+                  h(ActionButton, { variant: 'ghost', disabled: modeBusy, onClick: () => openEditMode(mode) }, t('customEdit')),
+                  h(ActionButton, { variant: 'ghost', disabled: modeBusy, onClick: () => deleteMode(mode) }, t('customDelete')),
+                )),
               ),
-          effective
-            ? h('p', { style: S.sub }, fmt(t('sessionEffective'), {
-                mode: effectiveModeLabel,
-                tools: effective.suppress.tools ? t('effectiveOn') : t('effectiveOff'),
-                runtime: effective.suppress.runtime ? t('effectiveOn') : t('effectiveOff'),
-              }))
-            : null,
+          editor === null
+            ? h(
+                'div',
+                { style: S.row },
+                h(
+                  ActionButton,
+                  {
+                    variant: 'outline',
+                    disabled: modeBusy || modes.length >= MAX_CUSTOM_MODES,
+                    onClick: openCreateMode,
+                  },
+                  t('customAdd'),
+                ),
+                modes.length >= MAX_CUSTOM_MODES ? h('span', { style: S.sub }, t('customLimit')) : null,
+              )
+            : renderEditor(),
+        ),
+
+        h(
+          'section',
+          { style: cardStyle },
+          h(
+            'div',
+            { style: S.row },
+            h('h3', { style: S.h3 }, t('defaultModeTitle')),
+            h('span', { style: { ...S.badge, ...S.badgeBlue } }, t('defaultBadge')),
+          ),
+          h('p', { style: S.sub }, t('defaultModeHint')),
+          h(
+            'div',
+            { style: S.row },
+            h('span', { style: S.sub }, t('defaultModeLabel')),
+            h(ModeMenu, {
+              t,
+              items: modeItems,
+              value: defaultMode,
+              disabled: defaultBusy,
+              onChange: saveDefaultMode,
+              title: t('defaultModeHint'),
+              dataName: 'default',
+              side: 'top',
+              triggerVariant: 'outline',
+            }),
+          ),
+          h('p', { style: S.sub }, fmt(t('defaultModeEffective'), { mode: defaultLabel })),
         ),
 
         h(
@@ -1103,6 +1390,7 @@ window.__ModuleLoader__.load({
                 h('div', null, last.toolsHeld === true
                   ? fmt(t('diagHeld'), { reason: last.toolsHeldReason === 'series-restart' ? t('diagHeldRestart') : t('diagHeldFirst') })
                   : t('diagHeldNone')),
+                last.seriesRestart === true ? h('div', null, t('diagSeriesRestarted')) : null,
                 h('div', null, `${fmt(t('diagStripped'), { count: last.stripped ?? 0 })}${last.stripKinds !== undefined && Object.keys(last.stripKinds).length > 0 ? fmt(t('diagKinds'), { kinds: Object.entries(last.stripKinds).map(([key, value]) => `${key}×${value}`).join(', ') }) : ''}`),
                 h('div', { style: S.mono }, `${t('diagPath')}：${data.path}`),
                 h('div', { style: S.sub }, fmt(t('diagCounters'), data.counters ?? { assemblies: 0, stripped: 0, held: 0 })),
@@ -1161,15 +1449,19 @@ window.__ModuleLoader__.load({
       }, [load]);
 
       if (sessionId === '') return null;
-      const mode = data?.session?.mode ?? 'global';
+      const config = data?.config;
+      const effectiveMode = data?.session?.mode ?? data?.config?.defaultMode ?? 'normal';
+      const override = data?.session?.override ?? null;
       const effectivePure = data?.session?.effective?.pure === true;
+      const items = buildModeItems(t, config);
       const change = async (next) => {
+        const target = next === config?.defaultMode ? 'default' : next;
         setBusy(true);
         setError('');
         try {
           const payload = await api('/session', {
             method: 'PUT',
-            body: JSON.stringify({ sessionId, mode: next }),
+            body: JSON.stringify({ sessionId, mode: target }),
           });
           setData(payload);
           notifyChanged();
@@ -1181,12 +1473,19 @@ window.__ModuleLoader__.load({
       };
       return h(
         'div',
-        { style: S.dock, 'data-plugin': 'dsh-prompt-studio', 'data-session-mode': mode, 'data-effective-pure': effectivePure ? '1' : '0' },
-        h('span', { style: S.dot(effectivePure ? 'pure' : mode), 'aria-hidden': 'true' }),
+        {
+          style: S.dock,
+          'data-plugin': 'dsh-prompt-studio',
+          'data-session-mode': effectiveMode,
+          'data-mode-override': override ?? '',
+          'data-effective-pure': effectivePure ? '1' : '0',
+        },
+        h('span', { style: S.dot(effectiveMode), 'aria-hidden': 'true' }),
         h('span', { style: S.dockLabel }, t('dockLabel')),
         h(ModeMenu, {
           t,
-          value: mode,
+          items,
+          value: effectiveMode,
           disabled: busy,
           onChange: change,
           title: error !== '' ? error : t('dockHint'),
@@ -1194,7 +1493,11 @@ window.__ModuleLoader__.load({
           side: 'top',
           compact: true,
         }),
-        effectivePure ? h('span', { style: { ...S.badge, ...S.badgeGreen } }, t('pureBadge')) : null,
+        override === null
+          ? h('span', { style: S.badge }, t('defaultBadge'))
+          : effectivePure
+            ? h('span', { style: { ...S.badge, ...S.badgeGreen } }, t('pureBadge'))
+            : null,
       );
     }
 
@@ -1214,7 +1517,7 @@ window.__ModuleLoader__.load({
           try {
             ctx.slots.inject('settings.section', () =>
               ctx.slots.register(
-                { name: 'settings.section', id: 'prompt-studio', order: 32, label: () => '提示词 / 纯聊天', inject: () => ({}) },
+                { name: 'settings.section', id: 'prompt-studio', order: 32, label: () => '提示词 / 模式', inject: () => ({}) },
                 Failure,
               ),
             );

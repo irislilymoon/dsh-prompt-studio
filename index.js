@@ -16,8 +16,12 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_PROMPT_CHARS = 200000;
 const MAX_SESSIONS = 500;
 const MAX_DIAGNOSTICS = 200;
+const MAX_CUSTOM_MODES = 20;
+const MAX_MODE_NAME_CHARS = 60;
+const CUSTOM_PREFIX = 'custom:';
+const MODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const PROMPT_MODES = new Set(['host', 'replace', 'only']);
-const SESSION_MODES = new Set(['global', 'pure', 'normal']);
+const BASE_MODES = new Set(['normal', 'pure']);
 const REMOVED_SECTIONS = new Set(['harness:identity', 'deployment:persona-prefix']);
 const RUNTIME_KINDS = new Set(['runtime-context']);
 const INJECTED_KINDS = new Set([
@@ -61,18 +65,79 @@ function dshHome() {
 
 function defaultState() {
   return {
-    version: 1,
+    version: 2,
     updatedAt: 0,
     prompt: { mode: 'host', text: '' },
     suppress: { runtime: false, tools: false, injected: false, all: false },
     toolSafety: false,
+    defaultMode: 'normal',
+    modes: [],
     sessions: {},
+  };
+}
+
+function emptySuppress() {
+  return { runtime: false, tools: false, injected: false, all: false };
+}
+
+function suppressOf(raw) {
+  const source = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    runtime: source.runtime === true,
+    tools: source.tools === true,
+    injected: source.injected === true,
+    all: source.all === true,
   };
 }
 
 function normalizeSessionId(raw) {
   const value = String(raw ?? '').trim();
   return value !== '' && value.length <= 200 ? value : '';
+}
+
+function customModeRef(id) {
+  return `${CUSTOM_PREFIX}${id}`;
+}
+
+function customModeIdOf(value) {
+  if (typeof value !== 'string' || !value.startsWith(CUSTOM_PREFIX)) return '';
+  const id = value.slice(CUSTOM_PREFIX.length);
+  return MODE_ID_RE.test(id) ? id : '';
+}
+
+function findCustomMode(state, value) {
+  const id = customModeIdOf(value);
+  if (id === '') return undefined;
+  return state.modes.find((mode) => mode.id === id);
+}
+
+function isKnownMode(state, value) {
+  if (typeof value !== 'string') return false;
+  if (BASE_MODES.has(value)) return true;
+  return findCustomMode(state, value) !== undefined;
+}
+
+function normalizeCustomMode(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  if (typeof raw.id !== 'string' || !MODE_ID_RE.test(raw.id)) return null;
+  const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, MAX_MODE_NAME_CHARS) : '';
+  if (name === '') return null;
+  return {
+    id: raw.id,
+    name,
+    promptMode: PROMPT_MODES.has(raw.promptMode) ? raw.promptMode : 'only',
+    promptText: typeof raw.promptText === 'string' ? raw.promptText.slice(0, MAX_PROMPT_CHARS) : '',
+    suppress: suppressOf(raw.suppress),
+    toolSafety: raw.toolSafety === true,
+    updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
+  };
+}
+
+function modeNameTaken(state, name, excludeId) {
+  const folded = name.trim().toLocaleLowerCase();
+  return state.modes.some(
+    (mode) => mode.id !== excludeId && mode.name.trim().toLocaleLowerCase() === folded,
+  );
 }
 
 function pruneSessions(sessions) {
@@ -88,9 +153,29 @@ function normalizeStored(raw) {
   const prompt = raw.prompt !== null && typeof raw.prompt === 'object' && !Array.isArray(raw.prompt)
     ? raw.prompt
     : {};
-  const suppress = raw.suppress !== null && typeof raw.suppress === 'object' && !Array.isArray(raw.suppress)
-    ? raw.suppress
-    : {};
+  const modes = [];
+  const usedIds = new Set();
+  if (Array.isArray(raw.modes)) {
+    for (const item of raw.modes) {
+      const mode = normalizeCustomMode(item);
+      if (mode === null || usedIds.has(mode.id)) continue;
+      usedIds.add(mode.id);
+      modes.push(mode);
+      if (modes.length >= MAX_CUSTOM_MODES) break;
+    }
+  }
+  const knownModes = new Set([...BASE_MODES, ...modes.map((mode) => customModeRef(mode.id))]);
+  const nextPrompt = {
+    mode: PROMPT_MODES.has(prompt.mode) ? prompt.mode : 'host',
+    text: typeof prompt.text === 'string' ? prompt.text.slice(0, MAX_PROMPT_CHARS) : '',
+  };
+  const nextSuppress = suppressOf(raw.suppress);
+  const legacyGlobalMode = isPureConfig(nextPrompt.mode, nextSuppress) ? 'pure' : 'normal';
+  const defaultMode = typeof raw.defaultMode === 'string'
+    && raw.defaultMode !== 'global'
+    && knownModes.has(raw.defaultMode)
+    ? raw.defaultMode
+    : legacyGlobalMode;
   const sessions = {};
   if (raw.sessions !== null && typeof raw.sessions === 'object' && !Array.isArray(raw.sessions)) {
     for (const [id, value] of Object.entries(raw.sessions)) {
@@ -104,24 +189,19 @@ function normalizeStored(raw) {
         mode = value.mode;
         updatedAt = Number.isFinite(value.updatedAt) ? value.updatedAt : 0;
       }
-      if (!SESSION_MODES.has(mode)) continue;
+      if (mode === 'global') mode = legacyGlobalMode;
+      if (!knownModes.has(mode) || mode === 'default') continue;
       sessions[sessionId] = { mode, updatedAt };
     }
   }
   return {
-    version: 1,
+    version: 2,
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
-    prompt: {
-      mode: PROMPT_MODES.has(prompt.mode) ? prompt.mode : 'host',
-      text: typeof prompt.text === 'string' ? prompt.text.slice(0, MAX_PROMPT_CHARS) : '',
-    },
-    suppress: {
-      runtime: suppress.runtime === true,
-      tools: suppress.tools === true,
-      injected: suppress.injected === true,
-      all: suppress.all === true,
-    },
+    prompt: nextPrompt,
+    suppress: nextSuppress,
     toolSafety: raw.toolSafety === true,
+    defaultMode,
+    modes,
     sessions: pruneSessions(sessions),
   };
 }
@@ -209,45 +289,62 @@ function activeSystemTexts(agent) {
   }
 }
 
-function isPure(state) {
-  const suppress = state.suppress;
-  return state.prompt.mode === 'only'
+function isPureConfig(promptMode, suppress) {
+  return promptMode === 'only'
     && suppress.runtime === true
     && suppress.tools === true
     && suppress.injected === true
     && suppress.all === true;
 }
 
-function effectiveFor(state, sessionId) {
-  const record = sessionId === '' ? undefined : state.sessions[sessionId];
-  const sessionMode = record?.mode ?? 'global';
-  if (sessionMode === 'pure') {
+function configForMode(state, modeValue) {
+  if (modeValue === 'normal') {
     return {
-      sessionMode,
-      promptMode: 'only',
-      promptText: state.prompt.text,
-      suppress: { runtime: true, tools: true, injected: true, all: true },
-      toolSafety: false,
-      pure: true,
-    };
-  }
-  if (sessionMode === 'normal') {
-    return {
-      sessionMode,
       promptMode: 'host',
       promptText: '',
-      suppress: { runtime: false, tools: false, injected: false, all: false },
+      suppress: emptySuppress(),
       toolSafety: false,
       pure: false,
     };
   }
+  if (modeValue === 'pure') {
+    const suppress = { runtime: true, tools: true, injected: true, all: true };
+    return {
+      promptMode: 'only',
+      promptText: state.prompt.text,
+      suppress,
+      toolSafety: false,
+      pure: true,
+    };
+  }
+  const custom = findCustomMode(state, modeValue);
+  if (custom !== undefined) {
+    return {
+      promptMode: custom.promptMode,
+      promptText: custom.promptText,
+      suppress: { ...custom.suppress },
+      toolSafety: custom.toolSafety,
+      pure: isPureConfig(custom.promptMode, custom.suppress),
+    };
+  }
   return {
-    sessionMode: 'global',
-    promptMode: state.prompt.mode,
-    promptText: state.prompt.text,
-    suppress: { ...state.suppress },
-    toolSafety: state.toolSafety === true,
-    pure: isPure(state),
+    promptMode: 'host',
+    promptText: '',
+    suppress: emptySuppress(),
+    toolSafety: false,
+    pure: false,
+  };
+}
+
+function effectiveFor(state, sessionId) {
+  const record = sessionId === '' ? undefined : state.sessions[sessionId];
+  const override = record?.mode ?? null;
+  const modeValue = override ?? state.defaultMode;
+  return {
+    sessionMode: modeValue,
+    mode: modeValue,
+    override,
+    ...configForMode(state, modeValue),
   };
 }
 
@@ -256,11 +353,23 @@ function publicConfig(state) {
     prompt: { mode: state.prompt.mode, text: state.prompt.text },
     suppress: { ...state.suppress },
     toolSafety: state.toolSafety === true,
+    defaultMode: state.defaultMode,
+    modes: state.modes.map((mode) => ({
+      id: mode.id,
+      name: mode.name,
+      promptMode: mode.promptMode,
+      promptText: mode.promptText,
+      suppress: { ...mode.suppress },
+      toolSafety: mode.toolSafety === true,
+      updatedAt: mode.updatedAt,
+    })),
   };
 }
 
 function publicEffective(effective) {
   return {
+    mode: effective.mode,
+    override: effective.override,
     promptMode: effective.promptMode,
     promptChars: effective.promptText.length,
     suppress: { ...effective.suppress },
@@ -487,7 +596,7 @@ function stripMessages(messages, effective) {
   return { messages: kept, dropped, droppedKinds };
 }
 
-function validateSettingsBody(body) {
+function validateSettingsBody(body, state) {
   let prompt;
   if (body.prompt !== undefined) {
     if (body.prompt === null || typeof body.prompt !== 'object' || Array.isArray(body.prompt)) {
@@ -533,10 +642,82 @@ function validateSettingsBody(body) {
     }
     toolSafety = body.toolSafety;
   }
-  if (prompt === undefined && suppress === undefined && toolSafety === undefined) {
+  let defaultMode;
+  if (body.defaultMode !== undefined) {
+    if (!isKnownMode(state, body.defaultMode)) {
+      throw httpError(400, 'defaultMode 不是可用的模式');
+    }
+    defaultMode = body.defaultMode;
+  }
+  if (prompt === undefined && suppress === undefined && toolSafety === undefined && defaultMode === undefined) {
     throw httpError(400, '没有可保存的设置字段');
   }
-  return { prompt, suppress, toolSafety };
+  return { prompt, suppress, toolSafety, defaultMode };
+}
+
+function readModeFields(body, existing) {
+  const next = existing === undefined || existing === null
+    ? {
+        name: '',
+        promptMode: 'only',
+        promptText: '',
+        suppress: emptySuppress(),
+        toolSafety: false,
+      }
+    : {
+        name: existing.name,
+        promptMode: existing.promptMode,
+        promptText: existing.promptText,
+        suppress: { ...existing.suppress },
+        toolSafety: existing.toolSafety === true,
+      };
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string') {
+      throw httpError(400, 'name 必须是字符串');
+    }
+    const name = body.name.trim();
+    if (name === '') throw httpError(400, '模式名称不能为空');
+    if (name.length > MAX_MODE_NAME_CHARS) {
+      throw httpError(400, `模式名称不能超过 ${MAX_MODE_NAME_CHARS} 个字符`);
+    }
+    next.name = name;
+  } else if (existing === undefined || existing === null) {
+    throw httpError(400, '模式名称不能为空');
+  }
+  if (body.promptMode !== undefined) {
+    if (!PROMPT_MODES.has(body.promptMode)) {
+      throw httpError(400, 'promptMode 只能是 host / replace / only');
+    }
+    next.promptMode = body.promptMode;
+  }
+  if (body.promptText !== undefined) {
+    if (typeof body.promptText !== 'string') {
+      throw httpError(400, 'promptText 必须是字符串');
+    }
+    if (body.promptText.length > MAX_PROMPT_CHARS) {
+      throw httpError(400, `promptText 超过 ${MAX_PROMPT_CHARS} 字符上限`, 'prompt-too-long');
+    }
+    next.promptText = body.promptText;
+  }
+  if (body.suppress !== undefined) {
+    if (body.suppress === null || typeof body.suppress !== 'object' || Array.isArray(body.suppress)) {
+      throw httpError(400, 'suppress 必须是对象');
+    }
+    for (const key of ['runtime', 'tools', 'injected', 'all']) {
+      if (body.suppress[key] === undefined) continue;
+      if (typeof body.suppress[key] !== 'boolean') {
+        throw httpError(400, `suppress.${key} 必须是布尔值`);
+      }
+      next.suppress[key] = body.suppress[key];
+    }
+  }
+  if (body.toolSafety !== undefined) {
+    if (typeof body.toolSafety !== 'boolean') {
+      throw httpError(400, 'toolSafety 必须是布尔值');
+    }
+    next.toolSafety = body.toolSafety;
+  }
+  return next;
 }
 
 function sendJson(res, status, body) {
@@ -620,12 +801,12 @@ function statePayload(store, runtime, state, sessionId) {
     path: store.path,
     updatedAt: state.updatedAt,
     config: publicConfig(state),
-    pureChat: isPure(state),
     session: sessionId === ''
       ? null
       : {
           id: sessionId,
           mode: effective.sessionMode,
+          override: effective.override,
           effective: publicEffective(effective),
         },
     last: sessionId === '' ? null : runtime.last.get(sessionId) ?? null,
@@ -643,6 +824,7 @@ function mount(ctx, cleanups) {
     generation: new WeakMap(),
     promptKey: new WeakMap(),
     pendingSeries: new WeakSet(),
+    forceSeries: new Set(),
     counters: { assemblies: 0, stripped: 0, held: 0 },
   };
   const effect = (label, factory) => {
@@ -667,16 +849,17 @@ function mount(ctx, cleanups) {
       }
       if (url.pathname === `${ROUTE_PREFIX}/settings` && method === 'PUT') {
         const body = await readJsonBody(req);
-        const patch = validateSettingsBody(body);
         const current = store.get();
+        const patch = validateSettingsBody(body, current);
         const next = {
           ...current,
           prompt: patch.prompt === undefined ? current.prompt : { ...current.prompt, ...patch.prompt },
           suppress: patch.suppress === undefined ? current.suppress : { ...current.suppress, ...patch.suppress },
           toolSafety: patch.toolSafety === undefined ? current.toolSafety : patch.toolSafety,
+          defaultMode: patch.defaultMode === undefined ? current.defaultMode : patch.defaultMode,
         };
         const saved = store.save(next);
-        logToHost(ctx, `[${PLUGIN_NAME}] 设置已保存：${saved.prompt.mode}；屏蔽 ${Object.entries(saved.suppress).filter(([, value]) => value === true).map(([key]) => key).join(',') || '（无）'}`);
+        logToHost(ctx, `[${PLUGIN_NAME}] 设置已保存：${saved.prompt.mode}；默认模式 ${saved.defaultMode}；屏蔽 ${Object.entries(saved.suppress).filter(([, value]) => value === true).map(([key]) => key).join(',') || '（无）'}`);
         const sessionId = normalizeSessionId(url.searchParams.get('session') ?? '');
         sendJson(res, 200, statePayload(store, runtime, saved, sessionId));
         return;
@@ -685,20 +868,82 @@ function mount(ctx, cleanups) {
         const body = await readJsonBody(req);
         const sessionId = normalizeSessionId(body.sessionId);
         if (sessionId === '') throw httpError(400, 'sessionId 不能为空');
-        if (!SESSION_MODES.has(body.mode)) {
-          throw httpError(400, 'mode 只能是 global / pure / normal');
-        }
         const current = store.get();
+        if (body.mode !== 'default' && !isKnownMode(current, body.mode)) {
+          throw httpError(400, 'mode 不是可用的模式');
+        }
         const sessions = { ...current.sessions };
-        if (body.mode === 'global') {
+        if (body.mode === 'default') {
           delete sessions[sessionId];
         } else {
           sessions[sessionId] = { mode: body.mode, updatedAt: Date.now() };
         }
         const saved = store.save({ ...current, sessions });
-        logToHost(ctx, `[${PLUGIN_NAME}] 会话 ${sessionId} 的模式已设为 ${body.mode}`);
+        // Mode changes land between turns; the next assemble must rebuild the system prompt even if the agent key is new.
+        runtime.forceSeries.add(sessionId);
+        logToHost(ctx, `[${PLUGIN_NAME}] 会话 ${sessionId} 的模式已设为 ${body.mode}，下一轮重开请求序列`);
         sendJson(res, 200, statePayload(store, runtime, saved, sessionId));
         return;
+      }
+      const modesMatch = url.pathname.match(/^\/prompt-studio\/modes(?:\/([^/]+))?$/);
+      if (modesMatch !== null) {
+        const modeId = modesMatch[1] ?? '';
+        const current = store.get();
+        const sessionId = normalizeSessionId(url.searchParams.get('session') ?? '');
+        if (method === 'POST' && modeId === '') {
+          const body = await readJsonBody(req);
+          const fields = readModeFields(body, null);
+          if (current.modes.length >= MAX_CUSTOM_MODES) {
+            throw httpError(409, `自定义模式最多 ${MAX_CUSTOM_MODES} 个`, 'too-many-modes');
+          }
+          if (modeNameTaken(current, fields.name, '')) {
+            throw httpError(409, '已存在同名模式', 'duplicate-name');
+          }
+          const mode = { id: randomUUID(), ...fields, updatedAt: Date.now() };
+          const saved = store.save({ ...current, modes: [...current.modes, mode] });
+          logToHost(ctx, `[${PLUGIN_NAME}] 已创建自定义模式 ${mode.name}（${mode.id}）`);
+          sendJson(res, 200, statePayload(store, runtime, saved, sessionId));
+          return;
+        }
+        if (method === 'PUT' && modeId !== '') {
+          const existing = current.modes.find((mode) => mode.id === modeId);
+          if (existing === undefined) throw httpError(404, '没有这个自定义模式', 'mode-not-found');
+          const body = await readJsonBody(req);
+          const fields = readModeFields(body, existing);
+          if (modeNameTaken(current, fields.name, modeId)) {
+            throw httpError(409, '已存在同名模式', 'duplicate-name');
+          }
+          const updated = { ...existing, ...fields, updatedAt: Date.now() };
+          const saved = store.save({
+            ...current,
+            modes: current.modes.map((mode) => (mode.id === modeId ? updated : mode)),
+          });
+          logToHost(ctx, `[${PLUGIN_NAME}] 已更新自定义模式 ${updated.name}（${updated.id}）`);
+          sendJson(res, 200, statePayload(store, runtime, saved, sessionId));
+          return;
+        }
+        if (method === 'DELETE' && modeId !== '') {
+          const existing = current.modes.find((mode) => mode.id === modeId);
+          if (existing === undefined) throw httpError(404, '没有这个自定义模式', 'mode-not-found');
+          const ref = customModeRef(modeId);
+          const sessions = {};
+          const affected = [];
+          for (const [id, record] of Object.entries(current.sessions)) {
+            if (record.mode === ref) affected.push(id);
+            else sessions[id] = record;
+          }
+          const defaultMode = current.defaultMode === ref ? 'normal' : current.defaultMode;
+          const saved = store.save({
+            ...current,
+            modes: current.modes.filter((mode) => mode.id !== modeId),
+            sessions,
+            defaultMode,
+          });
+          for (const id of affected) runtime.forceSeries.add(id);
+          logToHost(ctx, `[${PLUGIN_NAME}] 已删除自定义模式 ${existing.name}（${existing.id}）`);
+          sendJson(res, 200, statePayload(store, runtime, saved, sessionId));
+          return;
+        }
       }
       if (url.pathname === `${ROUTE_PREFIX}/default-prompt` && method === 'GET') {
         const sessionId = normalizeSessionId(url.searchParams.get('session') ?? '');
@@ -772,11 +1017,18 @@ function mount(ctx, cleanups) {
           if (agent !== null && agent !== undefined && typeof agent === 'object') {
             const key = `${effective.promptMode}\u0000${effective.promptText}`;
             const previousKey = runtime.promptKey.get(agent);
+            const nodes = activeSystemTexts(agent).filter((node) => node.text !== '');
+            if (sessionId !== '' && runtime.forceSeries.delete(sessionId)) {
+              runtime.pendingSeries.add(agent);
+            }
+            // A fresh agent lifecycle can still carry an old in-history prompt; rebuild once so the current mode wins.
+            if (previousKey === undefined && nodes.length > 0) {
+              runtime.pendingSeries.add(agent);
+            }
             if (previousKey !== undefined && previousKey !== key) runtime.pendingSeries.add(agent);
             runtime.promptKey.set(agent, key);
             if (effective.promptMode === 'only' && effective.promptText.trim() !== '') {
               const customText = replaceModelToken(effective.promptText, model);
-              const nodes = activeSystemTexts(agent).filter((node) => node.text !== '');
               if (nodes.length > 0 && (nodes.length !== 1 || nodes[0].text !== customText)) {
                 runtime.pendingSeries.add(agent);
               }
@@ -804,6 +1056,7 @@ function mount(ctx, cleanups) {
           toolsBaseline: tools.baseline,
           stripped: 0,
           stripKinds: {},
+          seriesRestart: false,
         });
         return rewritten;
       } catch (error) {
@@ -836,6 +1089,12 @@ function mount(ctx, cleanups) {
               at: Date.now(),
               stripped: filtered.dropped,
               stripKinds: filtered.droppedKinds,
+            });
+          }
+          if (pendingSeries) {
+            recordDiagnostics(runtime, sessionId, {
+              at: Date.now(),
+              seriesRestart: true,
             });
           }
           if (filtered.dropped === 0 && !pendingSeries) return decision;
@@ -889,7 +1148,7 @@ function mount(ctx, cleanups) {
   const globalState = store.get();
   logToHost(
     ctx,
-    `[${PLUGIN_NAME}] 已挂载：设置 ${store.path}；全局模式 ${globalState.prompt.mode}；纯聊天 ${isPure(globalState) ? '开' : '关'}；会话覆盖 ${Object.keys(globalState.sessions).length} 条`,
+    `[${PLUGIN_NAME}] 已挂载：设置 ${store.path}；默认模式 ${globalState.defaultMode}；自定义模式 ${globalState.modes.length} 个；会话覆盖 ${Object.keys(globalState.sessions).length} 条`,
   );
 }
 

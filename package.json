@@ -1,7 +1,7 @@
 {
   "name": "dsh-prompt-studio",
-  "version": "0.2.0",
-  "description": "Custom initial system prompt and pure-chat injection suppression for DeepSeek Harness",
+  "version": "0.3.0",
+  "description": "Custom initial system prompt, reusable chat modes and chat-only injection suppression for DeepSeek Harness",
   "author": "IrisLilyMoon",
   "repository": {
     "type": "git",
@@ -16,7 +16,8 @@
     "dsh-plugin",
     "deepseek-harness",
     "system-prompt",
-    "pure-chat",
+    "chat-only",
+    "custom-modes",
     "agents-md"
   ],
   "license": "MIT",
