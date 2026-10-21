@@ -2,9 +2,7 @@
 
 DSH 桌面端 / Web 端插件。用来改「初始系统提示词」，并把 DSH 额外注入的 runtime 上下文、工具 schema、AGENTS.md、时间读数等一层层撤掉，做到低 token 的纯聊天。
 
-GitHub: https://github.com/irislilymoon/dsh-prompt-studio
-
-> 设计参考：[dsh-persona-select](https://github.com/gosutry/dsh-persona-select)（MIT）。本项目是独立实现，并额外补上了全量替换旧系统提示词、原生主题 UI 与会话 composer 对齐。
+### 设计参考：[dsh-persona-select](https://github.com/gosutry/dsh-persona-select)（MIT）。本项目是独立实现，并额外补上了全量替换旧系统提示词、原生主题 UI 与会话 composer 对齐。
 
 ## 三种提示词模式
 
@@ -112,18 +110,12 @@ dsh plugin --profile <profile-name> add "<你的插件目录>/dsh-prompt-studio"
 - 仓库内不包含用户设置、会话日志、凭据、账号信息或本机绝对路径。
 - 提交 issue / 截图时请注意：轨迹和会话内容可能包含个人信息，上传前先自行脱敏；本插件本身不收集这些数据。
 
-## 发布
-
-仓库地址已写入 `package.json` 的 `repository` / `homepage` / `bugs`，可以直接 `npm pack` 或 `npm publish`。
-
-- GitHub: https://github.com/irislilymoon/dsh-prompt-studio
-- Issues: https://github.com/irislilymoon/dsh-prompt-studio/issues
 
 ## English
 
 A DSH Desktop/Web plugin that makes the initial system prompt editable and removes the extra system-side input DSH would otherwise send.
 
-> Design reference: [dsh-persona-select](https://github.com/gosutry/dsh-persona-select) (MIT). This is an independent implementation; it adds full replacement of stale system prompts, native theme-aware UI, and composer-aligned dock controls.
+### Design reference: [dsh-persona-select](https://github.com/gosutry/dsh-persona-select) (MIT). This is an independent implementation; it adds full replacement of stale system prompts, native theme-aware UI, and composer-aligned dock controls.
 
 - **Modes**: leave the host prompt untouched, replace only the opener, or replace the whole system prompt (Agent Teams, tool guidance and every other section are removed).
 - **Pure chat**: suppress runtime context (including the mandatory working-directory snapshot), tool schemas, AGENTS.md/time/skill injections, and every other non-user injection. Tools are absent from the first message, so even the first turn is cheap.
