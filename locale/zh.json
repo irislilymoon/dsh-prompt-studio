@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "系统提示词工作室",
-    "description": "自定义初始系统提示词和可复用的对话模式；可一键屏蔽 runtime 上下文、工具 schema、AGENTS.md 等注入，实现低 token 仅聊天。"
+    "description": "自定义初始系统提示词和可复用的对话模式；可按单项屏蔽 runtime 上下文、工具 schema、AGENTS.md 等注入，并在仅聊天里放行记忆、时间与少量工具。"
   }
 }

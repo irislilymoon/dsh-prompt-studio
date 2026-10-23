@@ -1,7 +1,7 @@
 {
   "name": "dsh-prompt-studio",
-  "version": "0.3.0",
-  "description": "Custom initial system prompt, reusable chat modes and chat-only injection suppression for DeepSeek Harness",
+  "version": "0.4.1",
+  "description": "Custom initial system prompt, reusable chat modes, granular chat-only suppression, and per-workspace SOUL/MEMORY injection for DeepSeek Harness (Desktop and Web)",
   "author": "IrisLilyMoon",
   "repository": {
     "type": "git",
@@ -18,7 +18,9 @@
     "system-prompt",
     "chat-only",
     "custom-modes",
-    "agents-md"
+    "agents-md",
+    "memory",
+    "desktop"
   ],
   "license": "MIT",
   "type": "module",
@@ -45,6 +47,7 @@
   },
   "scripts": {
     "check": "node --check index.js && node --check client.js",
+    "test": "node --test test/*.test.mjs",
     "pack": "npm pack"
   },
   "peerDependencies": {

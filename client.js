@@ -88,7 +88,7 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: '提示词 / 模式',
       title: '系统提示词工作室',
-      intro: '自定义初始系统提示词，并按需撤掉 DSH 注入的 runtime 上下文、工具 schema、AGENTS.md 与 skill 目录。普通模式、仅聊天和自定义模式可以在输入框上方切换，新对话使用你设置的默认模式。',
+      intro: '自定义初始系统提示词，并按需撤掉 DSH 注入的 runtime 上下文、工具 schema、AGENTS.md 与 skill 目录。普通模式、仅聊天和自定义模式可以在输入框上方切换；仅聊天可以单独放行记忆、时间读数和少数工具。新对话使用你设置的默认模式。',
       modeHost: '不覆盖',
       modeReplace: '只替换开场白',
       modeOnly: '全量替换',
@@ -107,16 +107,16 @@ window.__ModuleLoader__.load({
       cleared: '已清空编辑区，点击「保存设置」生效。',
       onlyPromptTitle: '仅聊天提示词',
       onlyPromptBadge: '全量替换',
-      onlyPromptHint: '仅聊天模式只发送这段提示词，并屏蔽 runtime 上下文、工具 schema、AGENTS.md、时间等所有系统侧输入。',
+      onlyPromptHint: '仅聊天模式默认只发送这段提示词，并屏蔽 runtime 上下文、工具 schema、AGENTS.md、时间等系统侧输入。可以在下方「仅聊天屏蔽与记忆」里放行记忆、时间或个别工具。',
       onlyPromptEmpty: '提示词为空时，仅聊天不会发送任何系统提示词；模型只会看到对话内容。',
       swRuntime: '屏蔽 runtime 上下文',
-      swRuntimeHint: '撤掉工作目录、沙箱/审批策略、skill 目录等 runtime 快照。插件会拦截整个快照投影，连 DSH 的必需工作目录上下文也不会发送。',
+      swRuntimeHint: '撤掉工作目录、沙箱/审批策略、skill 目录等 runtime 快照。总开关会拦下整份快照，包括 DSH 必需的 working-directory；展开单项后可以只屏蔽其中几项，或只保留工作目录。',
       swTools: '屏蔽工具 schema',
-      swToolsHint: '工具定义走独立协议字段，是最大的一笔 token。打开后模型没有可调用的工具。',
+      swToolsHint: '工具定义走独立协议字段，是最大的一笔 token。总开关会移除全部工具；展开单项后可以只保留个别工具，例如记忆默认放行的 read / write / edit。',
       swInjected: '屏蔽 AGENTS.md / 时间等注入',
-      swInjectedHint: '撤掉 workspace instructions（AGENTS.md / CLAUDE.md）、逐步时间读数、skill 目录与 /skill 调用内容。',
+      swInjectedHint: '撤掉 workspace instructions（AGENTS.md / CLAUDE.md）、逐步时间读数、skill 目录与 /skill 调用内容。展开单项后可以只保留时间读数等某一项。',
       swAll: '屏蔽所有非用户注入',
-      swAllHint: '用户角色里只要不是你自己发的消息就过滤掉，包括 plan-mode 提醒、goal/schedule 消息、session 引用等。这是最彻底的仅聊天。',
+      swAllHint: '用户角色里只要不是你自己发的消息就过滤掉，包括 plan-mode 提醒、goal/schedule 消息、session 引用等。总开关是最彻底的仅聊天；展开单项后可以只屏蔽其中几类。',
       swSafety: '工具基线保护',
       swSafetyHint: 'DSH 要求会话有一份非空工具声明基线，否则之后重新打开工具可能被服务端拒绝。勾上后，会话首轮和声明序列重启时会保留完整工具一轮——首轮会多花约 9k token。仅聊天默认关闭。',
       swSafetyCost: '首轮代价高；开启后首条消息不再是低 token。',
@@ -128,7 +128,7 @@ window.__ModuleLoader__.load({
       savedHint: '没有未保存的修改',
       modePure: '仅聊天',
       modeNormal: '普通模式',
-      modePureHint: '只发送仅聊天提示词 + 全部屏蔽',
+      modePureHint: '只发送仅聊天提示词，默认屏蔽全部系统侧输入；可在下方单独放行记忆、时间或工具',
       modeNormalHint: '使用 DSH 默认提示词与完整工具',
       defaultModeTitle: '新对话默认模式',
       defaultModeHint: '新建对话会自动使用这个模式；已有对话可以在输入框上方单独切换，没有单独切换过的对话也会跟随这里。',
@@ -137,7 +137,7 @@ window.__ModuleLoader__.load({
       defaultModeSaved: '新对话默认模式已更新。',
       defaultBadge: '默认',
       customTitle: '自定义模式',
-      customHint: '把一套系统提示词、屏蔽开关和工具保护保存成可复用的模式，会出现在输入框上方的模式菜单里。',
+      customHint: '把一套系统提示词、屏蔽开关、记忆和工具保护保存成可复用的模式，会出现在输入框上方的模式菜单里。',
       customAdd: '新建模式',
       customEmpty: '还没有自定义模式。',
       customEdit: '编辑',
@@ -160,6 +160,7 @@ window.__ModuleLoader__.load({
       customEmptyPrompt: '系统提示词为空时，这个模式不会发送提示词正文。',
       customSummary: '{mode} · {suppress}',
       customSuppressNone: '不屏蔽',
+      customSuppressItems: '仅屏蔽细项',
       customSuppressList: '屏蔽 {list}',
       sumRuntime: 'runtime',
       sumTools: '工具',
@@ -170,6 +171,9 @@ window.__ModuleLoader__.load({
       diagEmpty: '在当前会话发一条消息后，这里会显示上一轮实际装配的段数、工具数和过滤数量。',
       diagSections: '系统提示词段数 {before} → {after}',
       diagTools: '工具 schema {before} → {after}',
+      diagMemory: '记忆：{state}',
+      diagMemoryOn: '开',
+      diagMemoryOff: '关',
       diagHeld: '工具保活：{reason}',
       diagHeldNone: '工具保活：未触发',
       diagHeldFirst: '会话首轮保留完整工具',
@@ -186,12 +190,29 @@ window.__ModuleLoader__.load({
       dockLabel: '提示词',
       dockHint: '只影响当前对话：普通模式 / 仅聊天 / 自定义模式',
       pureBadge: '仅聊天',
+      lang: 'zh',
+      memoryLabel: '允许记忆',
+      memoryBadge: '记忆',
+      memoryHint: '在当前会话的工作目录读取并注入 SOUL.md / MEMORY.md，并默认放行 read / write / edit 与时间读数。文件不存在时模型可以用 write 创建。',
+      memoryRuntimeHint: '当 runtime 总开关打开时，记忆会保留当前工作目录，便于按相对路径读写这些文件。',
+      memoryScopeHint: '记忆开关属于当前模式；普通模式保持 DSH 默认行为，不读取这里的设置。',
+      memoryDefault: '记忆默认',
+      memoryDefaultHint: '开启记忆时这些项默认放行；勾选仍可单独屏蔽，但记忆可能无法正常工作。',
+      memoryDir: '记忆目录',
+      memoryNoDir: '当前会话没有工作目录，记忆不会注入',
+      subItems: '单项',
+      subItemsHint: '默认折叠。勾选表示屏蔽该项；总开关打开时，未勾选的项会被放行。带「记忆默认」的项可以勾选，但会影响记忆。',
+      subEmpty: '还没有可列出的项。发一条消息后，这里会显示当前会话实际出现的项目。',
+      pureSuppressTitle: '仅聊天屏蔽与记忆',
+      pureSuppressHint: '这些开关只作用于仅聊天模式。总开关保持「全部屏蔽」；展开单项后可以放行某一项，或只单独屏蔽某一项。',
+      customSuppressTitle: '屏蔽与记忆',
+      suppressSummaryExtra: '（{n} 项细调）',
     };
 
     const en = {
       nav: 'Prompt / modes',
       title: 'Prompt Studio',
-      intro: 'Edit the initial system prompt and optionally remove runtime context, tool schemas, AGENTS.md and skill catalogs injected by DSH. Switch between normal mode, chat only and custom modes above the composer; new chats use your default mode.',
+      intro: 'Edit the initial system prompt and optionally remove runtime context, tool schemas, AGENTS.md and skill catalogs injected by DSH. Switch between normal mode, chat only and custom modes above the composer; chat only can allow memory, time readings and a few tools individually. New chats use your default mode.',
       modeHost: 'Do not override',
       modeReplace: 'Replace opener only',
       modeOnly: 'Replace whole prompt',
@@ -210,16 +231,16 @@ window.__ModuleLoader__.load({
       cleared: 'Editor cleared. Click Save settings to apply.',
       onlyPromptTitle: 'Chat-only prompt',
       onlyPromptBadge: 'Replace whole prompt',
-      onlyPromptHint: 'Chat only sends exactly this prompt and suppresses runtime context, tool schemas, AGENTS.md, time readings and every other system-side input.',
+      onlyPromptHint: 'Chat only sends exactly this prompt and suppresses runtime context, tool schemas, AGENTS.md, time readings and every other system-side input by default. Allow memory, time or individual tools in “Chat-only suppression and memory” below.',
       onlyPromptEmpty: 'With an empty prompt, chat only sends no system prompt at all; the model sees only the conversation.',
       swRuntime: 'Suppress runtime context',
-      swRuntimeHint: 'Removes runtime snapshots: working directory, sandbox/approval policies, skill catalog. The plugin intercepts the whole projection, including DSH mandatory working-directory context.',
+      swRuntimeHint: 'Removes runtime snapshots: working directory, sandbox/approval policies, skill catalog. The master switch drops the whole snapshot, including DSH mandatory working-directory context; expand Items to suppress only some contexts or keep just the working directory.',
       swTools: 'Suppress tool schemas',
-      swToolsHint: 'Tool definitions are a separate wire field and usually the largest token item. With this on the model has nothing to call.',
+      swToolsHint: 'Tool definitions are a separate wire field and usually the largest token item. The master switch removes every tool; expand Items to keep individual tools such as read / write / edit, which memory allows by default.',
       swInjected: 'Suppress AGENTS.md / time injections',
-      swInjectedHint: 'Removes workspace instructions (AGENTS.md / CLAUDE.md), per-step time readings, skill catalogs and /skill content.',
+      swInjectedHint: 'Removes workspace instructions (AGENTS.md / CLAUDE.md), per-step time readings, skill catalogs and /skill content. Expand Items to keep individual entries such as time readings.',
       swAll: 'Suppress every non-user injection',
-      swAllHint: 'Drops every user-role message you did not send yourself, including plan-mode reminders, goal/schedule messages and session references. This is the most thorough chat-only setup.',
+      swAllHint: 'Drops every user-role message you did not send yourself, including plan-mode reminders, goal/schedule messages and session references. The master switch is the most thorough chat-only setup; expand Items to suppress only some kinds.',
       swSafety: 'Tool baseline protection',
       swSafetyHint: 'DSH expects a non-empty tool-declaration baseline; without one, re-enabling tools later in the same session may be rejected. When checked, the full tool list is kept for the session\u2019s first request and after a declaration-series restart \u2014 about 9k extra tokens on that turn. Off by default for chat only.',
       swSafetyCost: 'Costly first turn; the first message is no longer low-token.',
@@ -231,7 +252,7 @@ window.__ModuleLoader__.load({
       savedHint: 'No unsaved changes',
       modePure: 'Chat only',
       modeNormal: 'Normal mode',
-      modePureHint: 'Send only the chat-only prompt + suppress all system input',
+      modePureHint: 'Send only the chat-only prompt with every system input suppressed by default; allow memory, time or tools below',
       modeNormalHint: 'DSH default prompt and full tools',
       defaultModeTitle: 'Default mode for new chats',
       defaultModeHint: 'New chats start in this mode. Existing chats can switch from the prompt row above the composer; chats without their own choice also follow this setting.',
@@ -240,7 +261,7 @@ window.__ModuleLoader__.load({
       defaultModeSaved: 'Default mode for new chats updated.',
       defaultBadge: 'Default',
       customTitle: 'Custom modes',
-      customHint: 'Save a system prompt, suppression switches and tool protection as a reusable mode. It appears in the mode menu above the composer.',
+      customHint: 'Save a system prompt, suppression switches, memory and tool protection as a reusable mode. It appears in the mode menu above the composer.',
       customAdd: 'New mode',
       customEmpty: 'No custom modes yet.',
       customEdit: 'Edit',
@@ -263,6 +284,7 @@ window.__ModuleLoader__.load({
       customEmptyPrompt: 'With an empty system prompt, this mode sends no prompt text.',
       customSummary: '{mode} \u00b7 {suppress}',
       customSuppressNone: 'no suppression',
+      customSuppressItems: 'item-level suppression only',
       customSuppressList: 'suppress {list}',
       sumRuntime: 'runtime',
       sumTools: 'tools',
@@ -273,6 +295,9 @@ window.__ModuleLoader__.load({
       diagEmpty: 'Send a message in the current conversation to see how many sections, tools and injected messages the last turn actually had.',
       diagSections: 'System prompt sections {before} \u2192 {after}',
       diagTools: 'Tool schemas {before} \u2192 {after}',
+      diagMemory: 'Memory: {state}',
+      diagMemoryOn: 'on',
+      diagMemoryOff: 'off',
       diagHeld: 'Tool hold: {reason}',
       diagHeldNone: 'Tool hold: not triggered',
       diagHeldFirst: 'full tools kept on the session\u2019s first request',
@@ -289,6 +314,23 @@ window.__ModuleLoader__.load({
       dockLabel: 'Prompt',
       dockHint: 'This chat only: normal / chat only / custom modes',
       pureBadge: 'Chat only',
+      lang: 'en',
+      memoryLabel: 'Allow memory',
+      memoryBadge: 'Memory',
+      memoryHint: 'Read and inject SOUL.md / MEMORY.md from the current session working directory, and allow read / write / edit plus time readings by default. The model can create missing files with write.',
+      memoryRuntimeHint: 'While the runtime master switch is on, memory keeps the current working directory so those files can be addressed by relative path.',
+      memoryScopeHint: 'The memory switch belongs to the current mode. Normal mode keeps DSH defaults and ignores this setting.',
+      memoryDefault: 'Memory default',
+      memoryDefaultHint: 'These items are allowed by default while memory is on. You can still check them to suppress, but memory may stop working.',
+      memoryDir: 'Memory directory',
+      memoryNoDir: 'This session has no working directory; memory will not be injected',
+      subItems: 'Items',
+      subItemsHint: 'Collapsed by default. Checked means suppressed; while the master switch is on, unchecked items are allowed through. Items marked “Memory default” can still be checked, at the risk of breaking memory.',
+      subEmpty: 'Nothing to list yet. Send a message and items observed in this chat will appear here.',
+      pureSuppressTitle: 'Chat-only suppression and memory',
+      pureSuppressHint: 'These switches apply to chat-only mode only. The master switch keeps the old “suppress everything” behavior; expand Items to allow one item or suppress it selectively.',
+      customSuppressTitle: 'Suppression and memory',
+      suppressSummaryExtra: ' ({n} item overrides)',
     };
 
     function tOf(props) {
@@ -305,29 +347,214 @@ window.__ModuleLoader__.load({
       return t('modeOnly');
     }
 
-    function suppressSummary(suppress, t) {
+    function suppressSummary(suppress, t, config) {
       const labels = [];
       if (suppress?.runtime === true) labels.push(t('sumRuntime'));
       if (suppress?.tools === true) labels.push(t('sumTools'));
       if (suppress?.injected === true) labels.push(t('sumInjected'));
       if (suppress?.all === true) labels.push(t('sumAll'));
-      return labels.length === 0
-        ? t('customSuppressNone')
-        : fmt(t('customSuppressList'), { list: labels.join(' / ') });
+      if (labels.length === 0) {
+        const denied = SUPPRESS_KEYS.reduce(
+          (count, key) => count + (Array.isArray(config?.deny?.[key]) ? config.deny[key].length : 0),
+          0,
+        );
+        return denied > 0 ? t('customSuppressItems') : t('customSuppressNone');
+      }
+      return fmt(t('customSuppressList'), { list: labels.join(' / ') });
     }
 
     function customModeSummary(mode, t) {
-      const base = fmt(t('customSummary'), {
+      let base = fmt(t('customSummary'), {
         mode: promptModeLabel(mode.promptMode, t),
-        suppress: suppressSummary(mode.suppress, t),
+        suppress: suppressSummary(mode.suppress, t, mode),
       });
-      return mode.toolSafety === true ? `${base} · ${t('sumSafety')}` : base;
+      const overrides = overrideCount(mode);
+      if (overrides > 0) base += fmt(t('suppressSummaryExtra'), { n: overrides });
+      if (mode.memory === true) base += ` · ${t('memoryBadge')}`;
+      if (mode.toolSafety === true) base += ` · ${t('sumSafety')}`;
+      return base;
+    }
+
+    const SUPPRESS_KEYS = ['runtime', 'tools', 'injected', 'all'];
+    const USER_KINDS = new Set(['user', 'user-question-reply', 'user-approval']);
+    const INJECTED_KEYS = ['agent-instructions', 'time-context', 'skill-catalog', 'skill-invocation'];
+    const MEMORY_DEFAULT_ALLOW = {
+      runtime: ['working-directory:current'],
+      tools: ['read', 'write', 'edit', 'str_replace_editor'],
+      injected: ['time-context'],
+      all: ['time-context', 'runtime-context'],
+    };
+    const TOOL_CATALOG = [
+      { key: 'read', zh: '读取文件', en: 'Read file', zhHint: '记忆默认放行。', enHint: 'Allowed by default for memory.' },
+      { key: 'write', zh: '写入文件', en: 'Write file', zhHint: '记忆默认放行。', enHint: 'Allowed by default for memory.' },
+      { key: 'edit', zh: '编辑文件', en: 'Edit file', zhHint: '记忆默认放行。', enHint: 'Allowed by default for memory.' },
+      { key: 'str_replace_editor', zh: '文本替换编辑器', en: 'Text replace editor', zhHint: '记忆的备选编辑工具，默认放行。', enHint: 'Alternative editor, allowed by default for memory.' },
+      { key: 'read_image', zh: '读取图片', en: 'Read image' },
+      { key: 'glob', zh: '文件匹配', en: 'Glob files' },
+      { key: 'grep', zh: '内容搜索', en: 'Search contents' },
+      { key: 'bash', zh: 'Bash 命令', en: 'Bash command' },
+      { key: 'pwsh', zh: 'PowerShell 命令', en: 'PowerShell command' },
+      { key: 'terminal_open', zh: '打开终端', en: 'Open terminal' },
+      { key: 'terminal_send', zh: '终端输入', en: 'Send to terminal' },
+      { key: 'terminal_read', zh: '读取终端', en: 'Read terminal' },
+      { key: 'terminal_signal', zh: '终端信号', en: 'Signal terminal' },
+      { key: 'terminal_close', zh: '关闭终端', en: 'Close terminal' },
+      { key: 'terminal_list', zh: '终端列表', en: 'List terminals' },
+      { key: 'todo_write', zh: '待办清单', en: 'Todo list' },
+      { key: 'ask_user_question', zh: '询问用户', en: 'Ask user' },
+      { key: 'web_search', zh: '网页搜索', en: 'Web search' },
+      { key: 'web_fetch', zh: '打开网页', en: 'Fetch web page' },
+      { key: 'skill', zh: '调用技能', en: 'Invoke skill' },
+      { key: 'present', zh: '展示内容', en: 'Present content' },
+      { key: 'schedule_create', zh: '创建定时任务', en: 'Create schedule' },
+      { key: 'schedule_list', zh: '列出定时任务', en: 'List schedules' },
+      { key: 'schedule_update', zh: '更新定时任务', en: 'Update schedule' },
+      { key: 'schedule_delete', zh: '删除定时任务', en: 'Delete schedule' },
+      { key: 'subagent', zh: '子代理', en: 'Subagent' },
+      { key: 'send_message', zh: '团队消息', en: 'Team message' },
+      { key: 'list_agents', zh: '列出代理', en: 'List agents' },
+      { key: 'working_directory', zh: '切换工作目录', en: 'Change working directory' },
+      { key: 'load_workspace_dependencies', zh: '加载工作区依赖', en: 'Load workspace dependencies' },
+      { key: 'read_mcp_resource', zh: '读取 MCP 资源', en: 'Read MCP resource' },
+    ];
+    const RUNTIME_CATALOG = [
+      { key: 'working-directory:current', zh: '工作目录', en: 'Working directory', zhHint: 'DSH 必需的当前工作目录上下文；记忆开启时默认保留。', enHint: 'DSH mandatory current working directory; kept by default for memory.' },
+      { key: 'sandbox:policy', zh: '沙箱策略', en: 'Sandbox policy', zhHint: '文件与命令的沙箱权限说明。', enHint: 'Sandbox permissions for files and commands.' },
+      { key: 'approval:policy', zh: '审批策略', en: 'Approval policy', zhHint: '哪些操作需要用户审批。', enHint: 'Which operations need user approval.' },
+      { key: 'team:identity', zh: '团队身份', en: 'Team identity', zhHint: 'Agent Teams 的成员身份说明。', enHint: 'Agent Teams membership identity.' },
+      { key: 'subagent:delegation', zh: '子代理委派', en: 'Subagent delegation', zhHint: '子代理的委派上下文。', enHint: 'Subagent delegation context.' },
+      { key: 'harness-source', zh: 'Harness 源码', en: 'Harness source', zhHint: '调试用 Harness 源码路径。', enHint: 'Harness source path for development.' },
+      { key: 'web-surface', zh: 'Web 面板地址', en: 'Web surface URL', zhHint: '调试用 Web GUI 地址。', enHint: 'Web GUI URL for development.' },
+    ];
+    const INJECTED_CATALOG = [
+      { key: 'agent-instructions', zh: 'AGENTS.md / CLAUDE.md', en: 'AGENTS.md / CLAUDE.md', zhHint: '工作区指令文件。', enHint: 'Workspace instruction files.' },
+      { key: 'time-context', zh: '时间读数', en: 'Time readings', zhHint: '每步的当前时间与间隔；记忆开启时默认保留。', enHint: 'Current time and elapsed time per step; kept by default for memory.' },
+      { key: 'skill-catalog', zh: 'skill 目录', en: 'Skill catalog', zhHint: '可用技能列表。', enHint: 'Available skill list.' },
+      { key: 'skill-invocation', zh: '/skill 调用内容', en: '/skill invocation', zhHint: '斜杠命令展开的技能正文。', enHint: 'Expanded skill text from a slash command.' },
+    ];
+    const ALL_CATALOG = [
+      { key: 'plan-mode', zh: '计划模式提醒', en: 'Plan-mode reminder' },
+      { key: 'goal', zh: '目标轮次消息', en: 'Goal round message' },
+      { key: 'schedule', zh: '定时任务消息', en: 'Schedule message' },
+      { key: 'session-reference', zh: '会话引用', en: 'Session reference' },
+      { key: 'team-message', zh: '团队消息', en: 'Team message' },
+      { key: 'agent-message', zh: '代理消息', en: 'Agent message' },
+      { key: 'subagent-report', zh: '子代理报告', en: 'Subagent report' },
+      { key: 'subagent-settled', zh: '子代理完成通知', en: 'Subagent settled' },
+      { key: 'model-selection', zh: '模型切换提示', en: 'Model selection note' },
+      { key: 'repeat-tool-reminder', zh: '重复工具提醒', en: 'Repeat tool reminder' },
+      { key: 'compact-checkpoint', zh: '压缩检查点', en: 'Compaction checkpoint' },
+      { key: 'webhook', zh: 'Webhook 消息', en: 'Webhook message' },
+      { key: 'tmux-context', zh: '终端上下文', en: 'Terminal context' },
+    ];
+
+    function cloneFilterSet(raw) {
+      const out = { runtime: [], tools: [], injected: [], all: [] };
+      for (const key of SUPPRESS_KEYS) {
+        out[key] = Array.isArray(raw?.[key])
+          ? raw[key].filter((item) => typeof item === 'string' && item !== '')
+          : [];
+      }
+      return out;
+    }
+
+    function overrideCount(config) {
+      let count = 0;
+      for (const key of SUPPRESS_KEYS) {
+        count += Array.isArray(config?.allow?.[key]) ? config.allow[key].length : 0;
+        count += Array.isArray(config?.deny?.[key]) ? config.deny[key].length : 0;
+      }
+      return count;
+    }
+
+    function itemSuppressed(config, category, key, memoryDefault) {
+      if (memoryDefault === true) {
+        return (config?.deny?.[category] ?? []).includes(key);
+      }
+      if (config?.suppress?.[category] === true) {
+        return !(config.allow?.[category] ?? []).includes(key);
+      }
+      return (config?.deny?.[category] ?? []).includes(key);
+    }
+
+    function setSuppressMaster(config, category, value) {
+      if (config?.suppress === undefined || config?.allow === undefined || config?.deny === undefined) return;
+      config.suppress[category] = value === true;
+      config.allow[category] = [];
+      config.deny[category] = [];
+    }
+
+    function setSuppressItem(config, category, key, suppressed, itemKeys, memoryDefault, memoryKeys) {
+      if (config?.suppress === undefined || config?.allow === undefined || config?.deny === undefined) return;
+      if (typeof key !== 'string' || key === '') return;
+      if (memoryDefault === true) {
+        const deny = Array.isArray(config.deny[category]) ? config.deny[category] : [];
+        if (suppressed === true) {
+          if (!deny.includes(key)) config.deny[category] = [...deny, key];
+        } else {
+          config.deny[category] = deny.filter((item) => item !== key);
+        }
+        return;
+      }
+      if (config.suppress[category] === true) {
+        const allow = Array.isArray(config.allow[category]) ? config.allow[category] : [];
+        if (suppressed === true) config.allow[category] = allow.filter((item) => item !== key);
+        else if (!allow.includes(key)) config.allow[category] = [...allow, key];
+      } else {
+        const deny = Array.isArray(config.deny[category]) ? config.deny[category] : [];
+        if (suppressed === true) {
+          if (!deny.includes(key)) config.deny[category] = [...deny, key];
+        } else {
+          config.deny[category] = deny.filter((item) => item !== key);
+        }
+      }
+      if (config.suppress[category] !== true && Array.isArray(itemKeys) && itemKeys.length > 0) {
+        const deny = config.deny[category] ?? [];
+        if (itemKeys.every((item) => deny.includes(item))) {
+          const keepDeny = (Array.isArray(memoryKeys) ? memoryKeys : [])
+            .filter((item) => deny.includes(item));
+          config.suppress[category] = true;
+          config.allow[category] = [];
+          config.deny[category] = keepDeny;
+        }
+      }
+    }
+
+    function itemCatalog(category, extras, lang, memory) {
+      const catalogs = {
+        runtime: RUNTIME_CATALOG,
+        tools: TOOL_CATALOG,
+        injected: INJECTED_CATALOG,
+        all: ALL_CATALOG,
+      };
+      const base = catalogs[category] ?? [];
+      const known = new Set(base.map((item) => item.key));
+      const extraKeys = [];
+      for (const key of Array.isArray(extras) ? extras : []) {
+        if (typeof key !== 'string' || key === '' || known.has(key)) continue;
+        if (category === 'all' && USER_KINDS.has(key)) continue;
+        if (category === 'all' && (key === 'runtime-context' || INJECTED_KEYS.includes(key))) continue;
+        known.add(key);
+        extraKeys.push(key);
+      }
+      const items = [...base, ...extraKeys.map((key) => ({ key }))];
+      return items.map((item) => ({
+        key: item.key,
+        label: lang === 'en' ? (item.en ?? item.key) : (item.zh ?? item.key),
+        hint: lang === 'en' ? (item.enHint ?? '') : (item.zhHint ?? ''),
+        memoryDefault: memory === true && (MEMORY_DEFAULT_ALLOW[category] ?? []).includes(item.key),
+      }));
     }
 
     function buildModeItems(t, config) {
       const items = [
         { value: 'normal', label: t('modeNormal'), hint: t('modeNormalHint'), dot: '#2f7cf6' },
-        { value: 'pure', label: t('modePure'), hint: t('modePureHint'), dot: '#19b8a6' },
+        {
+          value: 'pure',
+          label: t('modePure'),
+          hint: config?.memory === true ? `${t('modePureHint')} · ${t('memoryBadge')}` : t('modePureHint'),
+          dot: '#19b8a6',
+        },
       ];
       const modes = Array.isArray(config?.modes) ? config.modes : [];
       for (const mode of modes) {
@@ -395,6 +622,9 @@ window.__ModuleLoader__.load({
           injected: config?.suppress?.injected === true,
           all: config?.suppress?.all === true,
         },
+        allow: cloneFilterSet(config?.allow),
+        deny: cloneFilterSet(config?.deny),
+        memory: config?.memory === true,
         toolSafety: config?.toolSafety === true,
       };
     }
@@ -652,6 +882,57 @@ window.__ModuleLoader__.load({
       switchLabel: { fontWeight: 500 },
       switchHint: { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-secondary, #61666b)' },
       switchCost: { fontSize: 12, lineHeight: '18px', color: 'rgba(220,150,60,0.98)' },
+      suppressGroup: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '8px 0',
+        borderTop: '0.5px solid var(--dsw-alias-border-l1, rgba(127,127,127,0.18))',
+      },
+      suppressHead: { display: 'flex', alignItems: 'flex-start', gap: 10 },
+      subToggle: {
+        font: 'inherit',
+        fontSize: 12,
+        lineHeight: '20px',
+        padding: '0 2px',
+        border: 'none',
+        background: 'transparent',
+        color: 'var(--dsw-alias-state-business-primary, #4176e6)',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        flex: 'none',
+      },
+      subList: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 5,
+        marginLeft: 22,
+        padding: '6px 9px 8px',
+        borderLeft: '2px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.28))',
+        background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,0.04))',
+        borderRadius: '0 6px 6px 0',
+        maxHeight: 280,
+        overflowY: 'auto',
+      },
+      subRow: {
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 6,
+        fontSize: 12.5,
+        lineHeight: '18px',
+        cursor: 'pointer',
+      },
+      subText: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 },
+      subLabel: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+      subBadge: {
+        fontSize: 10,
+        lineHeight: '14px',
+        padding: '0 5px',
+        borderRadius: 999,
+        border: '1px solid rgba(25,184,166,0.55)',
+        background: 'rgba(25,184,166,0.12)',
+        whiteSpace: 'nowrap',
+      },
       badge: {
         fontSize: 11,
         lineHeight: '16px',
@@ -740,6 +1021,84 @@ window.__ModuleLoader__.load({
           props.hint ? h('span', { style: S.switchHint }, props.hint) : null,
           props.cost ? h('span', { style: S.switchCost }, props.cost) : null,
         ),
+      );
+    }
+
+    function SuppressGroup(props) {
+      const t = tOf(props);
+      const [open, setOpen] = React.useState(false);
+      const items = Array.isArray(props.items) ? props.items : [];
+      const master = props.config?.suppress?.[props.category] === true;
+      const count = items.filter(
+        (item) => itemSuppressed(props.config, props.category, item.key, item.memoryDefault),
+      ).length;
+      return h(
+        'div',
+        { style: S.suppressGroup, 'data-suppress-group': props.category },
+        h(
+          'div',
+          { style: S.suppressHead },
+          h(
+            'div',
+            { style: S.grow },
+            h(Toggle, {
+              id: `suppress-${props.category}-master`,
+              checked: master,
+              label: props.label,
+              hint: props.hint,
+              onChange: (value) => props.onMaster(value),
+            }),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              style: S.subToggle,
+              'aria-expanded': open ? 'true' : 'false',
+              'data-suppress-toggle': props.category,
+              onClick: () => setOpen((previous) => !previous),
+            },
+            `${t('subItems')} ${count}/${items.length} ${open ? '▴' : '▾'}`,
+          ),
+        ),
+        open
+          ? h(
+              'div',
+              { style: S.subList, 'data-suppress-items': props.category },
+              h('p', { style: { ...S.switchHint, margin: 0 } }, t('subItemsHint')),
+              items.length === 0
+                ? h('p', { style: { ...S.switchHint, margin: 0 } }, t('subEmpty'))
+                : items.map((item) => {
+                    const memoryDefault = item.memoryDefault === true;
+                    const checked = itemSuppressed(props.config, props.category, item.key, memoryDefault);
+                    return h(
+                      'label',
+                      {
+                        key: item.key,
+                        style: S.subRow,
+                        title: memoryDefault ? t('memoryDefaultHint') : undefined,
+                      },
+                      h('input', {
+                        type: 'checkbox',
+                        checked,
+                        onChange: (event) => props.onItem(item.key, event.target.checked, memoryDefault),
+                        style: { marginTop: 2, flex: 'none' },
+                      }),
+                      h(
+                        'span',
+                        { style: S.subText },
+                        h(
+                          'span',
+                          { style: S.subLabel },
+                          item.label,
+                          memoryDefault ? h('span', { style: S.subBadge }, t('memoryDefault')) : null,
+                        ),
+                        item.hint ? h('span', { style: S.switchHint }, item.hint) : null,
+                      ),
+                    );
+                  }),
+            )
+          : null,
       );
     }
 
@@ -837,6 +1196,7 @@ window.__ModuleLoader__.load({
 
     function SettingsPage(props) {
       const t = tOf(props);
+      const lang = t('lang') === 'en' ? 'en' : 'zh';
       const mainSessionId = useMainSessionId();
       const [data, setData] = React.useState(null);
       const [baseline, setBaseline] = React.useState(null);
@@ -908,6 +1268,9 @@ window.__ModuleLoader__.load({
             body: JSON.stringify({
               prompt: { mode: 'only', text: nextDraft.prompt.text },
               suppress: nextDraft.suppress,
+              allow: nextDraft.allow,
+              deny: nextDraft.deny,
+              memory: nextDraft.memory,
               toolSafety: nextDraft.toolSafety,
             }),
           });
@@ -982,6 +1345,9 @@ window.__ModuleLoader__.load({
           promptMode: 'only',
           promptText: draft.prompt.text,
           suppress: { runtime: false, tools: false, injected: false, all: false },
+          allow: { runtime: [], tools: [], injected: [], all: [] },
+          deny: { runtime: [], tools: [], injected: [], all: [] },
+          memory: false,
           toolSafety: false,
         });
         setEditorFocus('');
@@ -996,6 +1362,9 @@ window.__ModuleLoader__.load({
           promptMode: mode.promptMode,
           promptText: mode.promptText,
           suppress: { ...mode.suppress },
+          allow: cloneFilterSet(mode.allow),
+          deny: cloneFilterSet(mode.deny),
+          memory: mode.memory === true,
           toolSafety: mode.toolSafety === true,
         });
         setEditorFocus('');
@@ -1006,7 +1375,12 @@ window.__ModuleLoader__.load({
       const updateEditor = (mutator) => {
         setEditor((previous) => {
           if (previous === null) return previous;
-          const next = { ...previous, suppress: { ...previous.suppress } };
+          const next = {
+            ...previous,
+            suppress: { ...previous.suppress },
+            allow: cloneFilterSet(previous.allow),
+            deny: cloneFilterSet(previous.deny),
+          };
           mutator(next);
           return next;
         });
@@ -1033,6 +1407,9 @@ window.__ModuleLoader__.load({
               promptMode: editor.promptMode,
               promptText: editor.promptText,
               suppress: editor.suppress,
+              allow: editor.allow,
+              deny: editor.deny,
+              memory: editor.memory,
               toolSafety: editor.toolSafety,
             }),
           });
@@ -1068,6 +1445,69 @@ window.__ModuleLoader__.load({
         } finally {
           setModeBusy(false);
         }
+      };
+
+      const renderMemoryToggle = (id, config, mutator) => h(
+        'div',
+        { style: S.switchText },
+        h(Toggle, {
+          id,
+          checked: config.memory === true,
+          label: t('memoryLabel'),
+          hint: t('memoryHint'),
+          onChange: (value) => mutator((next) => {
+            next.memory = value === true;
+          }),
+        }),
+        config.memory === true ? h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryRuntimeHint')) : null,
+        h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryScopeHint')),
+        h(
+          'p',
+          { style: { ...S.mono, margin: 0 } },
+          data?.memoryRoot
+            ? `${t('memoryDir')}：${data.memoryRoot}`
+            : t('memoryNoDir'),
+        ),
+      );
+
+      const renderSuppressGroups = (config, mutator) => {
+        const extras = {
+          runtime: data?.last?.runtimeNames ?? [],
+          tools: data?.last?.toolNames ?? [],
+          injected: [],
+          all: data?.last?.messageKinds ?? [],
+        };
+        return SUPPRESS_KEYS.map((category) => {
+          const items = itemCatalog(category, extras[category], lang, config.memory === true);
+          const normalKeys = items.filter((item) => item.memoryDefault !== true).map((item) => item.key);
+          const memoryKeys = items.filter((item) => item.memoryDefault === true).map((item) => item.key);
+          return h(SuppressGroup, {
+            key: category,
+            t,
+            lang,
+            category,
+            config,
+            label: category === 'runtime'
+              ? t('swRuntime')
+              : category === 'tools'
+                ? t('swTools')
+                : category === 'injected'
+                  ? t('swInjected')
+                  : t('swAll'),
+            hint: category === 'runtime'
+              ? t('swRuntimeHint')
+              : category === 'tools'
+                ? t('swToolsHint')
+                : category === 'injected'
+                  ? t('swInjectedHint')
+                  : t('swAllHint'),
+            items,
+            onMaster: (value) => mutator((next) => setSuppressMaster(next, category, value)),
+            onItem: (key, value, memoryDefault) => mutator(
+              (next) => setSuppressItem(next, category, key, value, normalKeys, memoryDefault, memoryKeys),
+            ),
+          });
+        });
       };
 
       const renderEditor = () => {
@@ -1162,42 +1602,9 @@ window.__ModuleLoader__.load({
               ? h('span', { style: S.switchCost }, t('customEmptyPrompt'))
               : null,
           ),
-          h(Toggle, {
-            id: 'custom-runtime',
-            checked: editor.suppress.runtime,
-            label: t('swRuntime'),
-            hint: t('swRuntimeHint'),
-            onChange: (value) => updateEditor((next) => {
-              next.suppress.runtime = value;
-            }),
-          }),
-          h(Toggle, {
-            id: 'custom-tools',
-            checked: editor.suppress.tools,
-            label: t('swTools'),
-            hint: t('swToolsHint'),
-            onChange: (value) => updateEditor((next) => {
-              next.suppress.tools = value;
-            }),
-          }),
-          h(Toggle, {
-            id: 'custom-injected',
-            checked: editor.suppress.injected,
-            label: t('swInjected'),
-            hint: t('swInjectedHint'),
-            onChange: (value) => updateEditor((next) => {
-              next.suppress.injected = value;
-            }),
-          }),
-          h(Toggle, {
-            id: 'custom-all',
-            checked: editor.suppress.all,
-            label: t('swAll'),
-            hint: t('swAllHint'),
-            onChange: (value) => updateEditor((next) => {
-              next.suppress.all = value;
-            }),
-          }),
+          h('h4', { style: { ...S.h3, margin: 0 } }, t('customSuppressTitle')),
+          renderMemoryToggle('custom-memory', editor, updateEditor),
+          ...renderSuppressGroups(editor, updateEditor),
           h(Toggle, {
             id: 'custom-toolSafety',
             checked: editor.toolSafety,
@@ -1297,6 +1704,33 @@ window.__ModuleLoader__.load({
 
         h(
           'section',
+          { style: cardStyle, 'data-pure-suppress': '1' },
+          h(
+            'div',
+            { style: S.row },
+            h('h3', { style: S.h3 }, t('pureSuppressTitle')),
+            draft.memory === true
+              ? h('span', { style: { ...S.badge, ...S.badgeGreen } }, t('memoryBadge'))
+              : null,
+          ),
+          h('p', { style: S.sub }, t('pureSuppressHint')),
+          renderMemoryToggle('pure-memory', draft, update),
+          ...renderSuppressGroups(draft, update),
+          h(Toggle, {
+            id: 'pure-toolSafety',
+            checked: draft.toolSafety,
+            disabled: !draft.suppress.tools,
+            label: t('swSafety'),
+            hint: t('swSafetyHint'),
+            cost: draft.toolSafety ? t('swSafetyCost') : '',
+            onChange: (value) => update((next) => {
+              next.toolSafety = value;
+            }),
+          }),
+        ),
+
+        h(
+          'section',
           { style: cardStyle },
           h(
             'div',
@@ -1387,6 +1821,9 @@ window.__ModuleLoader__.load({
                 { style: S.diag },
                 h('div', null, fmt(t('diagSections'), { before: last.sectionsBefore ?? '?', after: last.sectionsAfter ?? '?' })),
                 h('div', null, fmt(t('diagTools'), { before: last.toolsBefore ?? '?', after: last.toolsAfter ?? '?' })),
+                h('div', null, fmt(t('diagMemory'), {
+                  state: last.memory === true ? t('diagMemoryOn') : t('diagMemoryOff'),
+                })),
                 h('div', null, last.toolsHeld === true
                   ? fmt(t('diagHeld'), { reason: last.toolsHeldReason === 'series-restart' ? t('diagHeldRestart') : t('diagHeldFirst') })
                   : t('diagHeldNone')),
@@ -1453,6 +1890,7 @@ window.__ModuleLoader__.load({
       const effectiveMode = data?.session?.mode ?? data?.config?.defaultMode ?? 'normal';
       const override = data?.session?.override ?? null;
       const effectivePure = data?.session?.effective?.pure === true;
+      const effectiveMemory = data?.session?.effective?.memory === true;
       const items = buildModeItems(t, config);
       const change = async (next) => {
         const target = next === config?.defaultMode ? 'default' : next;
@@ -1479,6 +1917,7 @@ window.__ModuleLoader__.load({
           'data-session-mode': effectiveMode,
           'data-mode-override': override ?? '',
           'data-effective-pure': effectivePure ? '1' : '0',
+          'data-effective-memory': effectiveMemory ? '1' : '0',
         },
         h('span', { style: S.dot(effectiveMode), 'aria-hidden': 'true' }),
         h('span', { style: S.dockLabel }, t('dockLabel')),
@@ -1498,6 +1937,9 @@ window.__ModuleLoader__.load({
           : effectivePure
             ? h('span', { style: { ...S.badge, ...S.badgeGreen } }, t('pureBadge'))
             : null,
+        effectiveMemory
+          ? h('span', { style: { ...S.badge, ...S.badgeGreen } }, t('memoryBadge'))
+          : null,
       );
     }
 

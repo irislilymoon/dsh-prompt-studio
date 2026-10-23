@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Prompt Studio",
-    "description": "Edit the initial system prompt and reusable chat modes; suppress runtime context, tool schemas, AGENTS.md and other injections for low-token chat-only conversations."
+    "description": "Edit the initial system prompt and reusable chat modes; suppress runtime context, tool schemas and injections per item, and allow memory, time readings and a few tools in chat-only mode."
   }
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.1
+
+- Fix memory-related items being permanently disabled: “Memory default” items are now only marked when memory is on, and can still be checked to suppress. Turning memory off restores every item to a normal checkbox.
+- Make memory work in **all sessions**. Chat-only/custom modes now read and inject `SOUL.md` / `MEMORY.md` from the current session working directory; missing files are announced so the model can create them with `write`. Existing memory sections with the same headers are replaced before injection.
+- Keep explicit per-item denies authoritative over memory defaults, and preserve those denies when “select all” promotes a category back to the master switch.
+- Add memory file safety checks (symlink/out-of-root/oversized rejection) and tests for per-workspace injection.
+
+## 0.4.0
+
+- Add a **memory** switch to chat-only and custom modes. It allows `read` / `write` / `edit` / `str_replace_editor`, `time-context` and `working-directory:current` for workspace memory.
+- Add **per-item suppression** to all four categories (runtime contexts, tools, injections, other non-user messages). Each category keeps its master switch and gains a collapsed-by-default item list with allow/deny exceptions; selecting every ordinary item restores the old “block everything” behavior.
+- Mark items needed by memory as “Memory default”.
+- Filter tools by schema name and runtime contexts by context name instead of dropping the whole tool list or the whole runtime projection. The runtime projection wrapper can now keep `working-directory:current` while removing sandbox/approval/team contexts.
+- Add `allow` / `deny` lists and `memory` to the settings schema; v2 settings migrate to v3 with chat-only still suppressing all four categories.
+- Show observed tool names, runtime context names and injected message kinds in the item lists; the settings page lists them after the first turn.
+- Update README, locale strings, package metadata and add suppression unit tests.
+
 ## 0.3.0
 
 - Add **custom modes**: each mode stores its own name, prompt mode/text, suppression switches and tool-baseline protection; create, edit and delete them in Settings.
