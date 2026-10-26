@@ -14,11 +14,26 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 const PLUGIN_NAME = 'dsh-prompt-studio';
 const ROUTE_PREFIX = '/prompt-studio';
 const SECTION_NAME = 'plugin:prompt-studio';
-const SOUL_SECTION = 'plugin:prompt-studio-soul';
-const MEMORY_SECTION = 'plugin:prompt-studio-memory';
+// Shared section identity with dsh-qq-workspace: both plugins read the same
+// workspace SOUL.md / MEMORY.md, so they must claim the same section name. The
+// later writer removes the earlier section by name and adds its own, which
+// keeps exactly one copy in the assembly no matter which plugin runs last.
+const SOUL_SECTION = 'plugin:workspace-soul';
+const MEMORY_SECTION = 'plugin:workspace-memory';
+// Legacy names from earlier versions; still stripped so old assemblies settle.
+const LEGACY_MEMORY_SECTIONS = new Set([
+  'plugin:prompt-studio-soul',
+  'plugin:prompt-studio-memory',
+  'plugin:qq-soul',
+  'plugin:qq-memory',
+]);
 const SOUL_FILE = 'SOUL.md';
 const MEMORY_FILE = 'MEMORY.md';
 const MEMORY_INJECT_CHAR_LIMIT = 12000;
+const MEMORY_EDIT_CHAR_LIMIT = 60000;
+const MEMORY_FILE_LIMIT_BYTES = 1024 * 1024;
+const MEMORY_KINDS = Object.freeze(['soul', 'memory']);
+const MEMORY_FILE_OF = Object.freeze({ soul: SOUL_FILE, memory: MEMORY_FILE });
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_PROMPT_CHARS = 200000;
 const MAX_SESSIONS = 500;
@@ -104,15 +119,65 @@ function sessionRootOf(agent, ctx) {
   return '';
 }
 
+/**
+ * The one directory that owns SOUL.md / MEMORY.md for a session.
+ *
+ * A session's cwd is where the agent works, but the durable identity of the
+ * memory is its workspace, and dsh-qq-workspace reads the configured QQ
+ * workspace directory. Resolve through the workspace registry so both plugins
+ * land on the same directory for the same session: the workspace that accounts
+ * for this session first, then the one whose path is the cwd, then the bare cwd
+ * for an unregistered directory.
+ */
+function workspaceRootOf(ctx, agent) {
+  const cwd = sessionRootOf(agent, ctx);
+  if (cwd === '') return '';
+  const sessionId = sessionIdOf(agent);
+  try {
+    const registry = typeof ctx?.get === 'function' ? ctx.get('workspaceRegistry') : undefined;
+    const list = typeof registry?.list === 'function' ? registry.list() : undefined;
+    if (Array.isArray(list) && list.length > 0) {
+      const candidates = list.filter((workspace) => typeof workspace?.path === 'string' && workspace.path !== '');
+      if (sessionId !== '') {
+        const owner = candidates.find((workspace) => Array.isArray(workspace.sessionIds)
+          && workspace.sessionIds.includes(sessionId));
+        if (owner !== undefined) return owner.path;
+      }
+      const target = normPath(cwd);
+      const match = candidates.find((workspace) => normPath(workspace.path) === target);
+      if (match !== undefined) return match.path;
+    }
+  } catch {
+  }
+  return cwd;
+}
+
 function memoryRootFor(ctx, sessionId) {
   if (sessionId === '') return '';
+  let agent;
   try {
     const agents = typeof ctx?.get === 'function' ? ctx.get('agents') : undefined;
-    const agent = typeof agents?.get === 'function' ? agents.get(sessionId) : undefined;
-    return sessionRootOf(agent, ctx);
+    agent = typeof agents?.get === 'function' ? agents.get(sessionId) : undefined;
   } catch {
-    return '';
+    agent = undefined;
   }
+  const root = workspaceRootOf(ctx, agent);
+  if (root !== '') return root;
+  // No live agent (the session is not opened in this process yet): the registry
+  // still knows which workspace owns the session, which is all memory needs.
+  try {
+    const registry = typeof ctx?.get === 'function' ? ctx.get('workspaceRegistry') : undefined;
+    const list = typeof registry?.list === 'function' ? registry.list() : undefined;
+    if (Array.isArray(list)) {
+      const owner = list.find((workspace) => typeof workspace?.path === 'string'
+        && workspace.path !== ''
+        && Array.isArray(workspace.sessionIds)
+        && workspace.sessionIds.includes(sessionId));
+      if (owner !== undefined) return owner.path;
+    }
+  } catch {
+  }
+  return '';
 }
 
 function readMemoryFile(root, file) {
@@ -144,7 +209,7 @@ function readMemoryFile(root, file) {
   if (!info.isFile()) {
     return { exists: true, content: '', error: `${file} 不是普通文件`, truncated: false };
   }
-  if (info.size > 1024 * 1024) {
+  if (info.size > MEMORY_FILE_LIMIT_BYTES) {
     return { exists: true, content: '', error: `${file} 超过 1MB，已拒绝读取`, truncated: true };
   }
   try {
@@ -170,10 +235,68 @@ function memoryBody(content, file) {
   };
 }
 
+/** Resolve `root` to a real directory, or report why it cannot hold memory files. */
+function memoryRootReal(root) {
+  if (typeof root !== 'string' || root === '') return { ok: false, error: '当前会话没有工作目录' };
+  try {
+    const real = realpathSync.native(root);
+    if (!statSync(real).isDirectory()) return { ok: false, error: '当前会话工作目录不是文件夹' };
+    return { ok: true, real };
+  } catch {
+    return { ok: false, error: '当前会话工作目录不存在' };
+  }
+}
+
+/** Public per-file state for the settings UI: what the editor shows and saves. */
+function memoryFileState(root, kind) {
+  const file = MEMORY_FILE_OF[kind];
+  const file_ = readMemoryFile(root, file);
+  return {
+    kind,
+    file,
+    root: typeof root === 'string' ? root : '',
+    exists: file_.exists === true,
+    size: typeof file_.content === 'string' ? Buffer.byteLength(file_.content, 'utf8') : 0,
+    content: file_.error === '' ? String(file_.content ?? '') : '',
+    error: file_.error ?? '',
+    truncated: file_.truncated === true,
+    injectedLimit: MEMORY_INJECT_CHAR_LIMIT,
+    editLimit: MEMORY_EDIT_CHAR_LIMIT,
+  };
+}
+
+/**
+ * Write one memory file inside the workspace. Symlinks, non-regular files and
+ * paths that escape the workspace root are refused, mirroring the read guards so
+ * the UI can never be used to clobber something outside the workspace.
+ */
+function writeMemoryFile(root, kind, content) {
+  if (!MEMORY_KINDS.includes(kind)) throw httpError(400, 'kind 必须是 soul 或 memory');
+  const file = MEMORY_FILE_OF[kind];
+  if (typeof content !== 'string') throw httpError(400, 'content 必须是字符串');
+  if (content.length > MEMORY_EDIT_CHAR_LIMIT) {
+    throw httpError(413, `${file} 超过 ${MEMORY_EDIT_CHAR_LIMIT} 字符的编辑上限`, 'content-too-long');
+  }
+  const resolved = memoryRootReal(root);
+  if (resolved.ok !== true) throw httpError(400, resolved.error ?? '工作目录不可用', 'no-memory-root');
+  const target = join(resolved.real, file);
+  try {
+    const info = lstatSync(target);
+    if (info.isSymbolicLink()) throw httpError(400, `${file} 是符号链接，已拒绝写入`, 'memory-symlink');
+    if (!info.isFile()) throw httpError(400, `${file} 不是普通文件，已拒绝写入`, 'memory-not-file');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  const temp = join(resolved.real, `.${file}.${process.pid}.${randomUUID()}.tmp`);
+  writeFileSync(temp, content, 'utf8');
+  renameSync(temp, target);
+  return memoryFileState(resolved.real, kind);
+}
+
 function buildSoulText(file) {
   const lines = [
     '## Persistent persona (SOUL.md)',
-    'This workspace has a persistent persona file named SOUL.md in the session working directory. It defines the assistant\'s tone, style, values, and boundaries.',
+    'This workspace has a persistent persona file named SOUL.md in the workspace directory. It defines the assistant\'s tone, style, values, and boundaries.',
   ];
   if (typeof file.error === 'string' && file.error !== '') {
     lines.push(`SOUL.md is currently unavailable (${file.error}). Do not guess its contents.`);
@@ -197,7 +320,7 @@ function buildSoulText(file) {
 function buildMemoryText(file) {
   const lines = [
     '## Long-term memory (MEMORY.md)',
-    'This workspace has a persistent long-term memory file named MEMORY.md in the session working directory. It survives context compression and new conversations.',
+    'This workspace has a persistent long-term memory file named MEMORY.md in the workspace directory. It survives context compression and new conversations.',
   ];
   if (typeof file.error === 'string' && file.error !== '') {
     lines.push(`MEMORY.md is currently unavailable (${file.error}). Do not guess or claim to remember its contents.`);
@@ -223,12 +346,14 @@ function buildMemoryText(file) {
 function injectMemorySections(assembly, agent, effective, ctx) {
   if (assembly === null || typeof assembly !== 'object') return assembly;
   if (effective?.memory !== true) return assembly;
-  const root = sessionRootOf(agent, ctx);
+  const root = workspaceRootOf(ctx, agent);
   if (root === '') return assembly;
   const sections = (Array.isArray(assembly.sections) ? assembly.sections : [])
     .filter((section) => {
+      // Same section identity as dsh-qq-workspace (and legacy names), or the same
+      // header text from any other memory plugin: keep exactly one copy.
       if (section?.name === SOUL_SECTION || section?.name === MEMORY_SECTION) return false;
-      // Replace memory sections already injected by another plugin so assembly keeps one copy.
+      if (LEGACY_MEMORY_SECTIONS.has(section?.name)) return false;
       const text = String(section?.text ?? '').trimStart();
       return !text.startsWith(SOUL_HEADER) && !text.startsWith(MEMORY_HEADER);
     });
@@ -1257,12 +1382,18 @@ function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
 
 function statePayload(store, runtime, state, sessionId, ctx) {
   const effective = effectiveFor(state, sessionId);
+  const memoryRoot = memoryRootFor(ctx, sessionId);
   return {
     ok: true,
     path: store.path,
     updatedAt: state.updatedAt,
     config: publicConfig(state),
-    memoryRoot: memoryRootFor(ctx, sessionId),
+    memoryRoot,
+    memory: {
+      root: memoryRoot,
+      soul: memoryFileState(memoryRoot, 'soul'),
+      memory: memoryFileState(memoryRoot, 'memory'),
+    },
     session: sessionId === ''
       ? null
       : {
@@ -1308,6 +1439,27 @@ function mount(ctx, cleanups) {
         const sessionId = normalizeSessionId(url.searchParams.get('session') ?? '');
         const state = store.get();
         sendJson(res, 200, statePayload(store, runtime, state, sessionId, ctx));
+        return;
+      }
+      if (url.pathname === `${ROUTE_PREFIX}/memory` && (method === 'GET' || method === 'PUT')) {
+        const sessionId = normalizeSessionId(url.searchParams.get('session') ?? '');
+        const root = memoryRootFor(ctx, sessionId);
+        if (method === 'GET') {
+          sendJson(res, 200, {
+            ok: true,
+            root,
+            soul: memoryFileState(root, 'soul'),
+            memory: memoryFileState(root, 'memory'),
+          });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const kind = typeof body?.kind === 'string' ? body.kind.trim() : '';
+        if (!MEMORY_KINDS.includes(kind)) throw httpError(400, 'kind 必须是 soul 或 memory');
+        const saved = writeMemoryFile(root, kind, body.content);
+        logToHost(ctx, `[${PLUGIN_NAME}] 已保存工作区记忆文件 ${saved.file}（${saved.size} 字节）`);
+        runtime.forceSeries.add(sessionId);
+        sendJson(res, 200, { ok: true, root, file: saved });
         return;
       }
       if (url.pathname === `${ROUTE_PREFIX}/settings` && method === 'PUT') {
@@ -1668,4 +1820,8 @@ export const __test = {
   rewriteSections,
   injectMemorySections,
   readMemoryFile,
+  memoryFileState,
+  writeMemoryFile,
+  workspaceRootOf,
+  memoryRootFor,
 };

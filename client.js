@@ -193,9 +193,21 @@ window.__ModuleLoader__.load({
       lang: 'zh',
       memoryLabel: '允许记忆',
       memoryBadge: '记忆',
-      memoryHint: '在当前会话的工作目录读取并注入 SOUL.md / MEMORY.md，并默认放行 read / write / edit 与时间读数。文件不存在时模型可以用 write 创建。',
+      memoryHint: '读取并注入工作区的 SOUL.md / MEMORY.md，并默认放行 read / write / edit 与时间读数。文件不存在时模型可以用 write 创建。',
       memoryRuntimeHint: '当 runtime 总开关打开时，记忆会保留当前工作目录，便于按相对路径读写这些文件。',
       memoryScopeHint: '记忆开关属于当前模式；普通模式保持 DSH 默认行为，不读取这里的设置。',
+      memoryFiles: '记忆文件',
+      memoryFilesHint: '两个插件共用工作区里的同一份 SOUL.md 与 MEMORY.md，这里改的就是注入的那一份。',
+      memoryEmpty: '（空文件）',
+      memoryMissing: '文件还不存在，保存后会创建。',
+      memorySize: '{n} 字节',
+      memorySave: '保存',
+      memorySaving: '保存中…',
+      memorySaved: '已保存，下一轮请求生效。',
+      memorySaveFailed: '保存失败',
+      memoryReload: '重新读取',
+      memoryInjectedLimit: '注入上限 {n} 字符；编辑上限 {m} 字符。',
+      memoryTruncated: '超过注入上限，只注入前 {n} 字符。',
       memoryDefault: '记忆默认',
       memoryDefaultHint: '开启记忆时这些项默认放行；勾选仍可单独屏蔽，但记忆可能无法正常工作。',
       memoryDir: '记忆目录',
@@ -317,9 +329,21 @@ window.__ModuleLoader__.load({
       lang: 'en',
       memoryLabel: 'Allow memory',
       memoryBadge: 'Memory',
-      memoryHint: 'Read and inject SOUL.md / MEMORY.md from the current session working directory, and allow read / write / edit plus time readings by default. The model can create missing files with write.',
+      memoryHint: 'Read and inject the workspace SOUL.md / MEMORY.md, and allow read / write / edit plus time readings by default. The model can create missing files with write.',
       memoryRuntimeHint: 'While the runtime master switch is on, memory keeps the current working directory so those files can be addressed by relative path.',
       memoryScopeHint: 'The memory switch belongs to the current mode. Normal mode keeps DSH defaults and ignores this setting.',
+      memoryFiles: 'Memory files',
+      memoryFilesHint: 'Both plugins share the same workspace SOUL.md and MEMORY.md, so edits here change what gets injected.',
+      memoryEmpty: '(empty file)',
+      memoryMissing: 'This file does not exist yet; saving creates it.',
+      memorySize: '{n} bytes',
+      memorySave: 'Save',
+      memorySaving: 'Saving\u2026',
+      memorySaved: 'Saved; effective on the next turn.',
+      memorySaveFailed: 'Save failed',
+      memoryReload: 'Reload',
+      memoryInjectedLimit: 'Injected up to {n} characters; edited up to {m}.',
+      memoryTruncated: 'Exceeds the injection limit; only the first {n} characters are injected.',
       memoryDefault: 'Memory default',
       memoryDefaultHint: 'These items are allowed by default while memory is on. You can still check them to suppress, but memory may stop working.',
       memoryDir: 'Memory directory',
@@ -914,6 +938,24 @@ window.__ModuleLoader__.load({
         maxHeight: 280,
         overflowY: 'auto',
       },
+      memoryFile: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '8px 0',
+        borderTop: '0.5px solid var(--dsw-alias-border-l1, rgba(127,127,127,0.18))',
+      },
+      memoryTextarea: {
+        font: '12px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        padding: '7px 9px',
+        borderRadius: 8,
+        boxSizing: 'border-box',
+        resize: 'vertical',
+        minHeight: 140,
+        width: '100%',
+        outline: 'none',
+      },
+      memoryHead: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
       subRow: {
         display: 'flex',
         alignItems: 'flex-start',
@@ -1021,6 +1063,166 @@ window.__ModuleLoader__.load({
           props.hint ? h('span', { style: S.switchHint }, props.hint) : null,
           props.cost ? h('span', { style: S.switchCost }, props.cost) : null,
         ),
+      );
+    }
+
+    /**
+     * The memory master switch plus an expandable panel with the concrete
+     * SOUL.md / MEMORY.md the workspace injects. Both plugins read these same
+     * two files, so this panel is the one place that edits them.
+     */
+    function MemoryGroup(props) {
+      const t = tOf(props);
+      const [open, setOpen] = React.useState(false);
+      const [drafts, setDrafts] = React.useState({});
+      const [busy, setBusy] = React.useState('');
+      const [error, setError] = React.useState('');
+      const [notice, setNotice] = React.useState('');
+      const files = props.files;
+      const list = [files?.soul, files?.memory].filter((file) => file !== null && file !== undefined);
+      const present = list.filter((file) => file.exists === true).length;
+
+      React.useEffect(() => {
+        setDrafts({});
+        setError('');
+        setNotice('');
+      }, [files?.root]);
+
+      const draftOf = (file) => {
+        const saved = drafts[file.kind];
+        return typeof saved === 'string' ? saved : String(file.content ?? '');
+      };
+      const dirtyOf = (file) => draftOf(file) !== String(file.content ?? '');
+      const dirty = list.some(dirtyOf);
+
+      const save = async (file) => {
+        setBusy(file.kind);
+        setError('');
+        setNotice('');
+        try {
+          await api(`/memory${stateQuery(props.sessionId ?? '')}`, {
+            method: 'PUT',
+            body: JSON.stringify({ kind: file.kind, content: draftOf(file) }),
+          });
+          setDrafts((previous) => {
+            const next = { ...previous };
+            delete next[file.kind];
+            return next;
+          });
+          setNotice(t('memorySaved'));
+          if (typeof props.onReloaded === 'function') props.onReloaded();
+        } catch (problem) {
+          setError(`${t('memorySaveFailed')}：${problem?.message ?? String(problem)}`);
+        } finally {
+          setBusy('');
+        }
+      };
+
+      return h(
+        'div',
+        { style: S.suppressGroup, 'data-memory-group': props.id },
+        h(
+          'div',
+          { style: S.suppressHead },
+          h(
+            'div',
+            { style: S.grow },
+            h(Toggle, {
+              id: props.id,
+              checked: props.checked === true,
+              label: t('memoryLabel'),
+              hint: t('memoryHint'),
+              onChange: props.onChange,
+            }),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              style: S.subToggle,
+              'aria-expanded': open ? 'true' : 'false',
+              'data-memory-toggle': props.id,
+              onClick: () => setOpen((previous) => !previous),
+            },
+            `${t('memoryFiles')} ${present}/${list.length} ${open ? '▴' : '▾'}`,
+          ),
+        ),
+        props.checked === true ? h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryRuntimeHint')) : null,
+        h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryScopeHint')),
+        h(
+          'p',
+          { style: { ...S.mono, margin: 0 } },
+          props.memoryRoot ? `${t('memoryDir')}：${props.memoryRoot}` : t('memoryNoDir'),
+        ),
+        open
+          ? h(
+              'div',
+              { style: S.subList, 'data-memory-items': props.id },
+              h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryFilesHint')),
+              list.length === 0
+                ? h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryNoDir'))
+                : list.map((file) => h(
+                    'div',
+                    { key: file.kind, style: S.memoryFile, 'data-memory-file': file.kind },
+                    h(
+                      'div',
+                      { style: S.memoryHead },
+                      h('span', { style: { ...S.mono, wordBreak: 'keep-all' } }, file.file),
+                      h(
+                        'span',
+                        { style: S.badge },
+                        file.exists === true ? fmt(t('memorySize'), { n: file.size }) : t('memoryMissing'),
+                      ),
+                      h('span', { style: S.grow }),
+                      h(
+                        ActionButton,
+                        {
+                          onClick: () => save(file),
+                          // A missing file starts with empty content, so "unchanged"
+                          // must not block the save that creates it.
+                          disabled: busy !== '' || (file.exists === true && dirtyOf(file) !== true),
+                        },
+                        busy === file.kind ? t('memorySaving') : t('memorySave'),
+                      ),
+                    ),
+                    file.error ? h(Banner, { kind: 'error', text: file.error }) : null,
+                    h('textarea', {
+                      style: S.memoryTextarea,
+                      value: draftOf(file),
+                      placeholder: t('memoryEmpty'),
+                      spellCheck: false,
+                      'data-memory-editor': file.kind,
+                      onChange: (event) => setDrafts((previous) => ({
+                        ...previous,
+                        [file.kind]: event.target.value,
+                      })),
+                    }),
+                    h(
+                      'div',
+                      { style: S.row },
+                      h(
+                        'span',
+                        { style: S.switchHint },
+                        fmt(t('memoryInjectedLimit'), { n: file.injectedLimit, m: file.editLimit }),
+                      ),
+                      h('span', { style: S.grow }),
+                      h(
+                        'span',
+                        { style: S.mono },
+                        fmt(t('chars'), { n: draftOf(file).length }),
+                      ),
+                      file.truncated === true
+                        ? h('span', { style: S.switchCost }, fmt(t('memoryTruncated'), { n: file.injectedLimit }))
+                        : null,
+                    ),
+                  )),
+              h(Banner, { kind: 'error', text: error }),
+              h(Banner, { kind: 'notice', text: notice }),
+              dirty
+                ? h('p', { style: { ...S.switchCost, margin: 0 } }, t('unsaved'))
+                : null,
+            )
+          : null,
       );
     }
 
@@ -1447,28 +1649,19 @@ window.__ModuleLoader__.load({
         }
       };
 
-      const renderMemoryToggle = (id, config, mutator) => h(
-        'div',
-        { style: S.switchText },
-        h(Toggle, {
-          id,
-          checked: config.memory === true,
-          label: t('memoryLabel'),
-          hint: t('memoryHint'),
-          onChange: (value) => mutator((next) => {
-            next.memory = value === true;
-          }),
+      const renderMemoryToggle = (id, config, mutator) => h(MemoryGroup, {
+        id,
+        t,
+        lang,
+        checked: config.memory === true,
+        onChange: (value) => mutator((next) => {
+          next.memory = value === true;
         }),
-        config.memory === true ? h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryRuntimeHint')) : null,
-        h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryScopeHint')),
-        h(
-          'p',
-          { style: { ...S.mono, margin: 0 } },
-          data?.memoryRoot
-            ? `${t('memoryDir')}：${data.memoryRoot}`
-            : t('memoryNoDir'),
-        ),
-      );
+        memoryRoot: data?.memoryRoot ?? '',
+        files: data?.memory ?? null,
+        sessionId: mainSessionId,
+        onReloaded: () => load(true),
+      });
 
       const renderSuppressGroups = (config, mutator) => {
         const extras = {

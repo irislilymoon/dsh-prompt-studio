@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- The memory switch now has an expandable **memory files** panel, like the per-item suppression lists: it shows the resolved workspace directory and the concrete `SOUL.md` / `MEMORY.md` content, with exists/size/error state and an inline editor plus Save.
+- Add `GET /prompt-studio/memory` and `PUT /prompt-studio/memory` (`{ kind, content }`), and expose `memory.soul` / `memory.memory` in `/prompt-studio/state`. Writes are atomic, refuse symlinks/directories/out-of-workspace paths, and cap edits at 60000 characters.
+- Resolve memory through the workspace registry instead of the bare session cwd, so a session reads and edits the workspace that owns it.
+- Share the memory section names with `dsh-qq-workspace` (`plugin:workspace-soul` / `plugin:workspace-memory`) and strip the legacy names. Both plugins now read the same two workspace files and claim the same sections, so the assembly keeps exactly one copy regardless of plugin order or which plugin is enabled.
+- Update README wording from “session working directory” to the workspace root.
+
 ## 0.4.1
 
 - Fix memory-related items being permanently disabled: “Memory default” items are now only marked when memory is on, and can still be checked to suppress. Turning memory off restores every item to a normal checkbox.

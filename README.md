@@ -48,12 +48,14 @@ DSH 桌面端 / Web 端插件，用来编辑初始系统提示词，并按需撤
 
 ### 记忆
 
-打开「允许记忆」后，插件会在**当前会话的工作目录**读取两个文件，并在每轮装配时注入系统提示词。设置页会显示当前解析到的「记忆目录」，便于确认文件会创建在哪里：
+打开「允许记忆」后，插件会在**当前会话所属工作区的根目录**读取两个文件，并在每轮装配时注入系统提示词。设置页会显示当前解析到的「记忆目录」，展开「记忆文件」还能直接看到并编辑这两份文件的内容：
 
 - `SOUL.md`：人格、语气、价值观和边界。文件不存在时，只在你明确要求设置人格时才建议模型创建。
 - `MEMORY.md`：跨对话保留的用户偏好、项目背景和决定。文件不存在时，模型可以在学到耐久事实后自行创建。
 - 注入内容按字面处理，不参与 `{{变量}}` 插值；单文件最多注入 12000 字符，超出会截断并提示模型用 `read` 查看全文。
-- 符号链接、指向工作目录外的文件和非普通文件会被拒绝读取。
+- 符号链接、指向工作区外的文件和非普通文件会被拒绝读取和写入。
+
+**与 QQ 工作区共用同一份文件**：`dsh-qq-workspace` 的记忆开关也指向工作区里的 `SOUL.md` / `MEMORY.md`，两个插件解析出同一个目录、读写同一份文件，并使用同一个段名；因此无论开启哪个插件、以什么顺序装配，系统提示里都只会出现一份记忆。在任意一侧编辑，另一侧看到的都是改后的内容。
 
 同时默认放行这些工具/注入（带「记忆默认」标记，仍可在单项里勾选屏蔽，但记忆可能失效）：
 
@@ -95,7 +97,7 @@ DSH 桌面端 / Web 端插件，用来编辑初始系统提示词，并按需撤
 ## 实现位置
 
 - 系统提示词：监听 `system-prompt/assemble`，重写 `sections`，并按工具名过滤 `tools`。
-- 记忆：在装配后读取当前会话工作目录下的 `SOUL.md` / `MEMORY.md`，注入对应的 soul / memory 段；符号链接、越界文件、非普通文件和超过 1MB 的文件拒绝读取。注入前会替换已有的同名记忆段。
+- 记忆：在装配后读取工作区根目录下的 `SOUL.md` / `MEMORY.md`，注入对应的 soul / memory 段；符号链接、越界文件、非普通文件和超过 1MB 的文件拒绝读取。注入前会替换已有的同名记忆段，与 `dsh-qq-workspace` 共用同一段名，因此只会出现一份。
 - 用户侧注入：监听 `agent/pre-step`，按 `source.kind` 和 allow/deny 过滤 `messages`。
 - 请求序列：模式变化或旧 system 节点不匹配时，在 `agent/pre-step` 设置 `startsRequestSeries: true`，由 DSH 用当前模式的提示词覆盖旧节点。
 - runtime 上下文：按 agent 包装 `agent.runtimeContext.project`，按 context 名（如 `working-directory:current`、`sandbox:policy`）过滤快照后重新拼接；仅在投影无法包装时回退到 `systemPrompt.suppressRuntimeContext()`。
@@ -149,8 +151,8 @@ dsh plugin --profile <profile-name> add "<插件目录>/dsh-prompt-studio"
 ## 限制
 
 - **minimal 模式**：如果某个 agent preset 自己声明了 `complete: true` 的系统提示词段（DSH 内置 minimal 模式会），平台会在装配最后把它恢复为唯一段，本插件的提示词段无法进入。请改用 standard / cordis / ptc 等模式。
-- **记忆位置**：`SOUL.md` / `MEMORY.md` 位于当前会话的工作目录；没有工作目录的会话无法注入记忆。记忆按工作区隔离，每轮注入会消耗 Token，不要放密钥、密码或身份证件。只读会话仍然不能写入。
-- **提示注入**：工作目录里的 `SOUL.md` / `MEMORY.md` 会进入系统提示。打开不受信任的仓库前先确认这两个文件的内容；注入段会把它们当作背景数据而不是指令，但不能完全消除持久化提示注入的风险。
+- **记忆位置**：`SOUL.md` / `MEMORY.md` 位于当前会话所属工作区的根目录（与 `dsh-qq-workspace` 共用同一份文件）；没有工作目录的会话无法注入记忆。记忆按工作区隔离，每轮注入会消耗 Token，不要放密钥、密码或身份证件。只读会话仍然不能写入。
+- **提示注入**：工作区里的 `SOUL.md` / `MEMORY.md` 会进入系统提示。打开不受信任的仓库前先确认这两个文件的内容；注入段会把它们当作背景数据而不是指令，但不能完全消除持久化提示注入的风险。
 - **记忆默认项**：开启记忆时 `read` / `write` / `edit`、`time-context`、`working-directory:current` 默认放行；它们现在可以在单项里勾选屏蔽，但屏蔽后记忆可能无法读写或定位文件。
 - **工具恢复**：仅聊天或开启了工具屏蔽的自定义模式，如果最终工具列表为空，从首轮起工具基线为空，之后在同一会话打开工具可能被服务端拒绝；请新建会话，或在模式里预先开启「工具基线保护」。打开记忆后至少会保留几个文件工具，通常不会触发这个问题。
 - **已有工具调用的会话**：把已经调用过工具的会话切换到仅聊天时，工具历史与空声明可能对不上，容易被服务端拒绝；仅聊天建议使用新会话。
@@ -193,7 +195,7 @@ This is an independent implementation. It adds custom modes, a default mode for 
 - **Chat only**: send only the chat-only prompt from Settings and suppress all system-side input by default; allow memory, time readings or individual tools as needed.
 - **Custom modes**: save a name, system prompt, suppression masters, per-item allow/deny lists, memory and tool-baseline protection per mode.
 - **Granular suppression**: runtime contexts, tools, injections and other non-user messages each have a collapsed-by-default item list. The master switch keeps the old “suppress everything” behavior; expanding Items allows or suppresses individual entries.
-- **Memory**: reads and injects `SOUL.md` / `MEMORY.md` from the current session working directory. Chat only allows `read` / `write` / `edit` / `str_replace_editor`, `time-context` and the working directory by default; the model can create missing files with write. Same memory sections already present in the assembly are replaced before injection. Memory does not bypass the safety lock, approvals or workspace path checks. Normal mode ignores the memory switch; use a custom mode with “do not override” and memory on for the default prompt plus full tools and memory.
+- **Memory**: reads and injects `SOUL.md` / `MEMORY.md` from the workspace root, shared with `dsh-qq-workspace` (one file, one section, one copy in the prompt). Chat only allows `read` / `write` / `edit` / `str_replace_editor`, `time-context` and the working directory by default; the model can create missing files with write. Same memory sections already present in the assembly are replaced before injection. Memory does not bypass the safety lock, approvals or workspace path checks. Normal mode ignores the memory switch; use a custom mode with “do not override” and memory on for the default prompt plus full tools and memory.
 - **Default mode**: new chats start in normal mode, chat only or any custom mode.
 - **Per-chat override**: the selector above the composer affects the current conversation only.
 - **Live updates**: after a mode change, the next turn starts a new request series and rebuilds the system prompt, so an old chat-only prompt is not reused.
