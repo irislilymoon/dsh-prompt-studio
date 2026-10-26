@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.1
+
+- **Memory content is no longer shared with `dsh-qq-workspace`.** The QQ bot's workspace directory (read from `im-qqbot.config.cwd` in every profile's `cordis.patch.yml`) is filtered out of memory-root resolution, so this plugin neither injects nor edits `SOUL.md` / `MEMORY.md` there — that plugin owns those files, and each side keeps its own content. Sessions in that workspace show a note saying the QQ workspace plugin manages their files.
+- Only the memory switches stay linked (0.6.0 behavior unchanged): saving here syncs both per-file switches to QQ in both directions, and turning a file on in QQ turns the global switch on, while turning it off in QQ leaves this plugin alone.
+- Tests: `im-qqbot` patch parsing (quoted cwd, neighbouring entries ignored) and the QQ-workspace exclusion through `workspaceRootOf` / `memoryRootInfo` / `injectMemorySections`.
+
+## 0.6.0
+
+- `SOUL.md` and `MEMORY.md` now have **their own checkboxes** inside the memory files panel; only checked files are injected. The master “allow memory” switch is the pair — turning it sets both, and the collapsed button counts enabled files (“memory files 1/2”), no longer files that merely exist on disk.
+- Settings schema v4: `memoryFiles: { soul, memory }` per mode, with the boolean `memory` kept as the derived pair value. v3/v2 settings migrate by spreading the old master switch over both files.
+- **Sync the switch with `dsh-qq-workspace`**: saving memory settings propagates the per-file values into that plugin's `context.json` (both directions: off here turns it off there, on here turns it on there). Turning a file on in the QQ panel turns the global switch on here; turning one off there deliberately does not touch this plugin.
+- A disabled file no longer strips the section another memory plugin injected for it — dedupe now only removes the kinds this config injects.
+- Both settings panels reload when the other panel saves (`dsh-workspace-memory:changed`) and when the window regains focus, so edits made in one panel are visible in the other without a manual refresh.
+- Tests: per-file injection, single-file sections, v3/v4 migration, and the cross-plugin switch write.
+
 ## 0.5.0
 
 - The memory switch now has an expandable **memory files** panel, like the per-item suppression lists: it shows the resolved workspace directory and the concrete `SOUL.md` / `MEMORY.md` content, with exists/size/error state and an inline editor plus Save.

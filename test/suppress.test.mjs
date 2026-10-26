@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -22,11 +22,19 @@ const {
   rewriteSections,
   injectMemorySections,
   readMemoryFile,
+  qqCwdFromPatch,
+  isQQWorkspacePath,
+  resetQQWorkspaceCache,
+  memoryRootInfo,
+  workspaceRootOf,
 } = __test;
 
 function stateWith(overrides = {}) {
+  // A v3 payload has no memoryFiles key at all; spreading the current defaults
+  // would hide the master-switch migration this helper is meant to exercise.
+  const { memoryFiles: _ignored, ...defaults } = defaultState();
   return normalizeStored({
-    ...defaultState(),
+    ...defaults,
     version: 3,
     defaultMode: 'pure',
     ...overrides,
@@ -40,11 +48,27 @@ test('v2 settings migrate to the old chat-only behavior', () => {
     suppress: { runtime: false, tools: false, injected: false, all: false },
     defaultMode: 'normal',
   });
-  assert.equal(state.version, 3);
+  assert.equal(state.version, 4);
   assert.deepEqual(state.suppress, { runtime: true, tools: true, injected: true, all: true });
   assert.deepEqual(state.allow, { runtime: [], tools: [], injected: [], all: [] });
   assert.deepEqual(state.deny, { runtime: [], tools: [], injected: [], all: [] });
   assert.equal(state.memory, false);
+  assert.deepEqual(state.memoryFiles, { soul: false, memory: false });
+});
+
+test('v3 settings spread the master memory switch over both files', () => {
+  const state = stateWith({ memory: true });
+  assert.equal(state.version, 4);
+  assert.deepEqual(state.memoryFiles, { soul: true, memory: true });
+  assert.equal(state.memory, true);
+});
+
+test('v4 settings keep the per-file memory switches and derive the master', () => {
+  const both = normalizeStored({ ...defaultState(), memoryFiles: { soul: true, memory: false } });
+  assert.deepEqual(both.memoryFiles, { soul: true, memory: false });
+  assert.equal(both.memory, true);
+  const none = normalizeStored({ ...defaultState(), memory: true, memoryFiles: { soul: false, memory: false } });
+  assert.equal(none.memory, false);
 });
 
 test('memory allows only the minimum tools, time and working directory', () => {
@@ -322,16 +346,40 @@ test('memory sections are injected from the session working directory', () => {
         { name: 'plugin:other-memory', text: '## Long-term memory (MEMORY.md)\n- old entry' },
       ],
     };
-    const out = injectMemorySections(assembly, agent, { memory: true });
+    const out = injectMemorySections(assembly, agent, { memoryFiles: { soul: true, memory: true } });
     assert.deepEqual(out.sections.map((section) => section.name), [
-      'plugin:prompt-studio-soul',
+      'plugin:workspace-soul',
       'harness:identity',
-      'plugin:prompt-studio-memory',
+      'plugin:workspace-memory',
     ]);
     assert.match(out.sections[0].text, /Be concise/);
     assert.match(out.sections[2].text, /likes tea/);
     assert.doesNotMatch(out.sections[2].text, /old entry/);
-    assert.equal(injectMemorySections(assembly, agent, { memory: false }), assembly);
+    assert.equal(injectMemorySections(assembly, agent, { memoryFiles: { soul: false, memory: false } }), assembly);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a single memory file is injected without touching the other section', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ps-memory-one-'));
+  try {
+    writeFileSync(join(root, 'MEMORY.md'), '- likes tea\n', 'utf8');
+    const agent = { session: { header: { cwd: root } } };
+    const assembly = {
+      sections: [
+        { name: 'plugin:workspace-soul', text: '## Persistent persona (SOUL.md)\nfrom qq' },
+        { name: 'harness:identity', text: 'identity' },
+      ],
+    };
+    const out = injectMemorySections(assembly, agent, { memoryFiles: { soul: false, memory: true } });
+    assert.deepEqual(out.sections.map((section) => section.name), [
+      'plugin:workspace-soul',
+      'harness:identity',
+      'plugin:workspace-memory',
+    ]);
+    assert.equal(out.sections[0].text, '## Persistent persona (SOUL.md)\nfrom qq');
+    assert.match(out.sections[2].text, /likes tea/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -343,9 +391,9 @@ test('missing memory files are announced instead of injected', () => {
     const out = injectMemorySections(
       { sections: [] },
       { session: { header: { cwd: root } } },
-      { memory: true },
+      { memoryFiles: { soul: true, memory: true } },
     );
-    assert.deepEqual(out.sections.map((section) => section.name), ['plugin:prompt-studio-soul', 'plugin:prompt-studio-memory']);
+    assert.deepEqual(out.sections.map((section) => section.name), ['plugin:workspace-soul', 'plugin:workspace-memory']);
     assert.match(out.sections[0].text, /does not exist yet/);
     assert.match(out.sections[1].text, /does not exist yet/);
   } finally {
@@ -371,4 +419,77 @@ test('memory reader rejects symlinks or out-of-root files', (t) => {
     rmSync(root, { recursive: true, force: true });
     rmSync(outside, { force: true });
   }
+});
+
+test('qq cwd parser reads the im-qqbot patch entry and skips other entries', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ps-qq-patch-'));
+  try {
+    const patch = join(home, 'cordis.patch.yml');
+    writeFileSync(patch, [
+      '# comment with - id: im-qqbot inside',
+      "- id: llm-deepseek",
+      '  config:',
+      "    reasoningEffort: low",
+      "- id: im-qqbot",
+      '  config:',
+      "    cwd: 'D:\\bot-files'",
+      '    media:',
+      '      ttlHours: 0',
+      '- id: ui-chat',
+      '  config:',
+      '    cwd: should-not-count',
+    ].join('\n'), 'utf8');
+    assert.equal(qqCwdFromPatch(patch), 'D:\\bot-files');
+    writeFileSync(patch, '- id: other\n  config:\n    cwd: nope\n', 'utf8');
+    assert.equal(qqCwdFromPatch(patch), '');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('the qq workspace directory is excluded from memory management', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'ps-qq-home-'));
+  const workspace = join(home, 'bot-files');
+  mkdirSync(join(home, 'profiles', 'desktop'), { recursive: true });
+  mkdirSync(workspace, { recursive: true });
+  writeFileSync(
+    join(home, 'profiles', 'desktop', 'cordis.patch.yml'),
+    "- id: im-qqbot\n  config:\n    cwd: 'D:\\bot-files'\n",
+    'utf8',
+  );
+  // Point the plugin at the fake home; the QQ cwd above does not exist on disk
+  // in this temp tree, so register a second profile whose cwd does.
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = join(home, 'real-home');
+  mkdirSync(join(process.env.DSH_HOME, 'profiles', 'desktop'), { recursive: true });
+  writeFileSync(
+    join(process.env.DSH_HOME, 'profiles', 'desktop', 'cordis.patch.yml'),
+    `- id: im-qqbot\n  config:\n    cwd: '${workspace}'\n`,
+    'utf8',
+  );
+  resetQQWorkspaceCache();
+  t.after(() => {
+    if (previousHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previousHome;
+    resetQQWorkspaceCache();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  assert.equal(isQQWorkspacePath(workspace), true);
+  assert.equal(isQQWorkspacePath(join(home, 'something-else')), false);
+
+  const agent = { session: { header: { cwd: workspace } } };
+  const ctx = { get: (key) => (key === 'agents' ? { get: () => agent } : undefined) };
+  assert.equal(workspaceRootOf(ctx, agent), '');
+  const info = memoryRootInfo(ctx, 'session-qq');
+  assert.equal(info.managedByQQ, true);
+
+  const otherAgent = { session: { header: { cwd: join(home, 'other-workspace') } } };
+  assert.equal(workspaceRootOf(ctx, otherAgent), join(home, 'other-workspace'));
+
+  const assembly = { sections: [{ name: 'harness:identity', text: 'identity' }] };
+  assert.equal(
+    injectMemorySections(assembly, agent, { memoryFiles: { soul: true, memory: true } }),
+    assembly,
+  );
 });

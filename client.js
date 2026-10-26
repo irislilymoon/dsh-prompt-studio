@@ -32,6 +32,7 @@ window.__ModuleLoader__.load({
     const NS = 'prompt-studio';
     const ROUTE = '/prompt-studio';
     const CHANGED_EVENT = 'dsh-prompt-studio:changed';
+    const MEMORY_EVENT = 'dsh-workspace-memory:changed';
     const MAX_CUSTOM_MODES = 20;
     let fallbackT = (key) => key;
     const sessionsHolder = { service: null };
@@ -80,6 +81,17 @@ window.__ModuleLoader__.load({
       try {
         if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
           window.dispatchEvent(new Event(CHANGED_EVENT));
+        }
+      } catch {
+      }
+    }
+
+    // Shared with dsh-qq-workspace's client: both settings panels edit the same
+    // SOUL.md / MEMORY.md, so a save in one panel makes the other reload at once.
+    function notifyMemoryChanged() {
+      try {
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+          window.dispatchEvent(new Event(MEMORY_EVENT));
         }
       } catch {
       }
@@ -196,8 +208,10 @@ window.__ModuleLoader__.load({
       memoryHint: '读取并注入工作区的 SOUL.md / MEMORY.md，并默认放行 read / write / edit 与时间读数。文件不存在时模型可以用 write 创建。',
       memoryRuntimeHint: '当 runtime 总开关打开时，记忆会保留当前工作目录，便于按相对路径读写这些文件。',
       memoryScopeHint: '记忆开关属于当前模式；普通模式保持 DSH 默认行为，不读取这里的设置。',
+      memoryFileToggle: '下面每个文件有独立勾选，勾选的才会注入；保存后生效。',
+      memorySyncNote: '这里是全局开关，改动会同步到 QQ 工作区插件：这边开启或关闭都会同步过去，QQ 那边单独开启也会开启这边，但 QQ 那边关闭不影响这里（它只管它自己工作区的会话）。',
       memoryFiles: '记忆文件',
-      memoryFilesHint: '两个插件共用工作区里的同一份 SOUL.md 与 MEMORY.md，这里改的就是注入的那一份。',
+      memoryFilesHint: '编辑的就是当前会话工作区会被注入的那一份；QQ 机器人工作区的文件由 QQ 工作区插件单独管理。',
       memoryEmpty: '（空文件）',
       memoryMissing: '文件还不存在，保存后会创建。',
       memorySize: '{n} 字节',
@@ -212,6 +226,7 @@ window.__ModuleLoader__.load({
       memoryDefaultHint: '开启记忆时这些项默认放行；勾选仍可单独屏蔽，但记忆可能无法正常工作。',
       memoryDir: '记忆目录',
       memoryNoDir: '当前会话没有工作目录，记忆不会注入',
+      memoryQQManaged: '这个会话属于 QQ 工作区：它的人格与记忆文件由 QQ 工作区插件单独管理，这里不读写那两个文件，只有上面的开关会同步过去。',
       subItems: '单项',
       subItemsHint: '默认折叠。勾选表示屏蔽该项；总开关打开时，未勾选的项会被放行。带「记忆默认」的项可以勾选，但会影响记忆。',
       subEmpty: '还没有可列出的项。发一条消息后，这里会显示当前会话实际出现的项目。',
@@ -332,8 +347,10 @@ window.__ModuleLoader__.load({
       memoryHint: 'Read and inject the workspace SOUL.md / MEMORY.md, and allow read / write / edit plus time readings by default. The model can create missing files with write.',
       memoryRuntimeHint: 'While the runtime master switch is on, memory keeps the current working directory so those files can be addressed by relative path.',
       memoryScopeHint: 'The memory switch belongs to the current mode. Normal mode keeps DSH defaults and ignores this setting.',
+      memoryFileToggle: 'Each file has its own checkbox; only checked files are injected. Saving applies it.',
+      memorySyncNote: 'This is the global switch and syncs with the QQ workspace plugin: turning it on or off here also turns it there, and turning a file on there turns it on here (turning one off there leaves this alone).',
       memoryFiles: 'Memory files',
-      memoryFilesHint: 'Both plugins share the same workspace SOUL.md and MEMORY.md, so edits here change what gets injected.',
+      memoryFilesHint: 'Editing here changes what gets injected for the current session workspace; the QQ bot workspace files are managed by the QQ workspace plugin.',
       memoryEmpty: '(empty file)',
       memoryMissing: 'This file does not exist yet; saving creates it.',
       memorySize: '{n} bytes',
@@ -348,6 +365,7 @@ window.__ModuleLoader__.load({
       memoryDefaultHint: 'These items are allowed by default while memory is on. You can still check them to suppress, but memory may stop working.',
       memoryDir: 'Memory directory',
       memoryNoDir: 'This session has no working directory; memory will not be injected',
+      memoryQQManaged: 'This session belongs to the QQ workspace: its persona and memory files are managed by the QQ workspace plugin, and this panel never reads or writes them — only the switches above sync over.',
       subItems: 'Items',
       subItemsHint: 'Collapsed by default. Checked means suppressed; while the master switch is on, unchecked items are allowed through. Items marked “Memory default” can still be checked, at the risk of breaking memory.',
       subEmpty: 'Nothing to list yet. Send a message and items observed in this chat will appear here.',
@@ -648,6 +666,10 @@ window.__ModuleLoader__.load({
         },
         allow: cloneFilterSet(config?.allow),
         deny: cloneFilterSet(config?.deny),
+        memoryFiles: {
+          soul: config?.memoryFiles?.soul === true,
+          memory: config?.memoryFiles?.memory === true,
+        },
         memory: config?.memory === true,
         toolSafety: config?.toolSafety === true,
       };
@@ -1080,7 +1102,8 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState('');
       const files = props.files;
       const list = [files?.soul, files?.memory].filter((file) => file !== null && file !== undefined);
-      const present = list.filter((file) => file.exists === true).length;
+      const flags = props.memoryFiles ?? {};
+      const enabled = list.filter((file) => flags[file.kind] === true).length;
 
       React.useEffect(() => {
         setDrafts({});
@@ -1110,6 +1133,7 @@ window.__ModuleLoader__.load({
             return next;
           });
           setNotice(t('memorySaved'));
+          notifyMemoryChanged();
           if (typeof props.onReloaded === 'function') props.onReloaded();
         } catch (problem) {
           setError(`${t('memorySaveFailed')}：${problem?.message ?? String(problem)}`);
@@ -1144,16 +1168,16 @@ window.__ModuleLoader__.load({
               'data-memory-toggle': props.id,
               onClick: () => setOpen((previous) => !previous),
             },
-            `${t('memoryFiles')} ${present}/${list.length} ${open ? '▴' : '▾'}`,
+            `${t('memoryFiles')} ${enabled}/${list.length} ${open ? '▴' : '▾'}`,
           ),
         ),
         props.checked === true ? h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryRuntimeHint')) : null,
         h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryScopeHint')),
-        h(
-          'p',
-          { style: { ...S.mono, margin: 0 } },
-          props.memoryRoot ? `${t('memoryDir')}：${props.memoryRoot}` : t('memoryNoDir'),
-        ),
+        h('p', { style: { ...S.switchHint, margin: 0 } }, t('memoryFileToggle')),
+        props.synced === true ? h('p', { style: { ...S.switchHint, margin: 0 } }, t('memorySyncNote')) : null,
+        props.qqManaged === true
+          ? h('p', { style: { ...S.mono, margin: 0 } }, t('memoryQQManaged'))
+          : h('p', { style: { ...S.mono, margin: 0 } }, props.memoryRoot ? `${t('memoryDir')}：${props.memoryRoot}` : t('memoryNoDir')),
         open
           ? h(
               'div',
@@ -1167,6 +1191,15 @@ window.__ModuleLoader__.load({
                     h(
                       'div',
                       { style: S.memoryHead },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: flags[file.kind] === true,
+                        disabled: busy !== '',
+                        'aria-label': file.file,
+                        'data-memory-check': file.kind,
+                        onChange: (event) => props.onFileChange?.(file.kind, event.target.checked),
+                        style: { marginTop: 2, flex: 'none' },
+                      }),
                       h('span', { style: { ...S.mono, wordBreak: 'keep-all' } }, file.file),
                       h(
                         'span',
@@ -1447,8 +1480,18 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined;
         const onChanged = () => load(true);
+        // Cross-plugin memory edits and a refocused window both mean the file
+        // on disk may have moved under this panel.
+        const onMemory = () => load(true);
+        const onFocus = () => load(true);
         window.addEventListener(CHANGED_EVENT, onChanged);
-        return () => window.removeEventListener(CHANGED_EVENT, onChanged);
+        window.addEventListener(MEMORY_EVENT, onMemory);
+        window.addEventListener('focus', onFocus);
+        return () => {
+          window.removeEventListener(CHANGED_EVENT, onChanged);
+          window.removeEventListener(MEMORY_EVENT, onMemory);
+          window.removeEventListener('focus', onFocus);
+        };
       }, [load]);
 
       const update = (mutator) => {
@@ -1472,7 +1515,8 @@ window.__ModuleLoader__.load({
               suppress: nextDraft.suppress,
               allow: nextDraft.allow,
               deny: nextDraft.deny,
-              memory: nextDraft.memory,
+              memoryFiles: nextDraft.memoryFiles,
+              memory: nextDraft.memoryFiles?.soul === true || nextDraft.memoryFiles?.memory === true,
               toolSafety: nextDraft.toolSafety,
             }),
           });
@@ -1484,6 +1528,7 @@ window.__ModuleLoader__.load({
           setStatus('ready');
           dirtyRef.current = false;
           notifyChanged();
+          notifyMemoryChanged();
         } catch (problem) {
           setError(`${t('saveFailed')}：${problem?.message ?? String(problem)}`);
         } finally {
@@ -1549,6 +1594,7 @@ window.__ModuleLoader__.load({
           suppress: { runtime: false, tools: false, injected: false, all: false },
           allow: { runtime: [], tools: [], injected: [], all: [] },
           deny: { runtime: [], tools: [], injected: [], all: [] },
+          memoryFiles: { soul: false, memory: false },
           memory: false,
           toolSafety: false,
         });
@@ -1566,6 +1612,10 @@ window.__ModuleLoader__.load({
           suppress: { ...mode.suppress },
           allow: cloneFilterSet(mode.allow),
           deny: cloneFilterSet(mode.deny),
+          memoryFiles: {
+            soul: mode.memoryFiles?.soul === true,
+            memory: mode.memoryFiles?.memory === true,
+          },
           memory: mode.memory === true,
           toolSafety: mode.toolSafety === true,
         });
@@ -1611,7 +1661,8 @@ window.__ModuleLoader__.load({
               suppress: editor.suppress,
               allow: editor.allow,
               deny: editor.deny,
-              memory: editor.memory,
+              memoryFiles: editor.memoryFiles,
+              memory: editor.memoryFiles?.soul === true || editor.memoryFiles?.memory === true,
               toolSafety: editor.toolSafety,
             }),
           });
@@ -1620,6 +1671,7 @@ window.__ModuleLoader__.load({
           setEditorFocus('');
           setNotice(t('customSaved'));
           notifyChanged();
+          notifyMemoryChanged();
         } catch (problem) {
           setError(`${t('saveFailed')}：${problem?.message ?? String(problem)}`);
         } finally {
@@ -1649,15 +1701,26 @@ window.__ModuleLoader__.load({
         }
       };
 
-      const renderMemoryToggle = (id, config, mutator) => h(MemoryGroup, {
+      const renderMemoryToggle = (id, config, mutator, synced) => h(MemoryGroup, {
         id,
         t,
         lang,
+        synced: synced === true,
         checked: config.memory === true,
         onChange: (value) => mutator((next) => {
+          next.memoryFiles = { soul: value === true, memory: value === true };
           next.memory = value === true;
         }),
+        onFileChange: (kind, value) => mutator((next) => {
+          next.memoryFiles = {
+            ...(next.memoryFiles ?? { soul: false, memory: false }),
+            [kind]: value === true,
+          };
+          next.memory = next.memoryFiles.soul === true || next.memoryFiles.memory === true;
+        }),
+        memoryFiles: config.memoryFiles,
         memoryRoot: data?.memoryRoot ?? '',
+        qqManaged: data?.memory?.managedByQQ === true,
         files: data?.memory ?? null,
         sessionId: mainSessionId,
         onReloaded: () => load(true),
@@ -1907,7 +1970,7 @@ window.__ModuleLoader__.load({
               : null,
           ),
           h('p', { style: S.sub }, t('pureSuppressHint')),
-          renderMemoryToggle('pure-memory', draft, update),
+          renderMemoryToggle('pure-memory', draft, update, true),
           ...renderSuppressGroups(draft, update),
           h(Toggle, {
             id: 'pure-toolSafety',

@@ -3,6 +3,7 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   statSync,
@@ -21,12 +22,8 @@ const SECTION_NAME = 'plugin:prompt-studio';
 const SOUL_SECTION = 'plugin:workspace-soul';
 const MEMORY_SECTION = 'plugin:workspace-memory';
 // Legacy names from earlier versions; still stripped so old assemblies settle.
-const LEGACY_MEMORY_SECTIONS = new Set([
-  'plugin:prompt-studio-soul',
-  'plugin:prompt-studio-memory',
-  'plugin:qq-soul',
-  'plugin:qq-memory',
-]);
+const LEGACY_SOUL_SECTIONS = new Set(['plugin:prompt-studio-soul', 'plugin:qq-soul']);
+const LEGACY_MEMORY_SECTIONS = new Set(['plugin:prompt-studio-memory', 'plugin:qq-memory']);
 const SOUL_FILE = 'SOUL.md';
 const MEMORY_FILE = 'MEMORY.md';
 const MEMORY_INJECT_CHAR_LIMIT = 12000;
@@ -34,6 +31,12 @@ const MEMORY_EDIT_CHAR_LIMIT = 60000;
 const MEMORY_FILE_LIMIT_BYTES = 1024 * 1024;
 const MEMORY_KINDS = Object.freeze(['soul', 'memory']);
 const MEMORY_FILE_OF = Object.freeze({ soul: SOUL_FILE, memory: MEMORY_FILE });
+// dsh-qq-workspace stores its own QQ-session-scoped copy of the same two
+// switches; the names are its settings keys in ~/.dsh/qq-workspace/context.json.
+const QQ_CONTEXT_FILE = 'context.json';
+const QQ_MEMORY_SETTING_OF = Object.freeze({ soul: 'soulEnabled', memory: 'memoryEnabled' });
+const QQ_PATCH_FILE = 'cordis.patch.yml';
+const QQ_PATCH_ENTRY_ID = 'im-qqbot';
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_PROMPT_CHARS = 200000;
 const MAX_SESSIONS = 500;
@@ -102,6 +105,90 @@ function isWithinPath(root, target) {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
+function yamlScalarValue(raw) {
+  let value = String(raw ?? '').trim();
+  if (value.length >= 2
+    && ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"')))) {
+    value = value.slice(1, -1);
+  }
+  return value.replace(/''/g, "'");
+}
+
+/** Minimal `cwd:` lookup inside the `- id: im-qqbot` patch entry. */
+function qqCwdFromPatch(patchPath) {
+  let raw = '';
+  try {
+    raw = readFileSync(patchPath, 'utf8');
+  } catch {
+    return '';
+  }
+  let inEntry = false;
+  let cwd = '';
+  for (const line of raw.split(/\r?\n/)) {
+    if (/^- id:\s*im-qqbot\s*(#.*)?$/.test(line)) {
+      inEntry = true;
+      cwd = '';
+      continue;
+    }
+    if (!inEntry) continue;
+    if (/^-\s+id:/.test(line)) {
+      if (cwd !== '') return cwd;
+      inEntry = false;
+      continue;
+    }
+    const match = line.match(/^\s+cwd:\s*(.+?)\s*(#.*)?$/);
+    if (match !== null) cwd = yamlScalarValue(match[1]);
+  }
+  return cwd;
+}
+
+const qqWorkspaceCache = { stampMs: -1, paths: [] };
+
+/**
+ * Directories the QQ bot plugin owns (its configured cwd in every profile's
+ * patch layer). dsh-prompt-studio never manages memory there — that plugin has
+ * its own switches and its own copy of the files — so these paths are filtered
+ * out of memory root resolution.
+ */
+function qqWorkspacePaths() {
+  const profilesDir = join(dshHome(), 'profiles');
+  let stamp = -1;
+  const patches = [];
+  try {
+    for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const patch = join(profilesDir, entry.name, QQ_PATCH_FILE);
+      try {
+        stamp = Math.max(stamp, statSync(patch).mtimeMs);
+        patches.push(patch);
+      } catch {
+      }
+    }
+  } catch {
+    return [];
+  }
+  if (stamp === qqWorkspaceCache.stampMs) return qqWorkspaceCache.paths;
+  const paths = [];
+  for (const patch of patches) {
+    const cwd = qqCwdFromPatch(patch);
+    if (cwd !== '') paths.push(normPath(cwd));
+  }
+  qqWorkspaceCache.stampMs = stamp;
+  qqWorkspaceCache.paths = paths;
+  return paths;
+}
+
+function isQQWorkspacePath(path) {
+  if (typeof path !== 'string' || path === '') return false;
+  const normalized = normPath(path);
+  return qqWorkspacePaths().includes(normalized);
+}
+
+function resetQQWorkspaceCache() {
+  qqWorkspaceCache.stampMs = -1;
+  qqWorkspaceCache.paths = [];
+}
+
 function sessionRootOf(agent, ctx) {
   try {
     const projections = typeof ctx?.get === 'function' ? ctx.get('sessionProjections') : undefined;
@@ -129,7 +216,7 @@ function sessionRootOf(agent, ctx) {
  * for this session first, then the one whose path is the cwd, then the bare cwd
  * for an unregistered directory.
  */
-function workspaceRootOf(ctx, agent) {
+function workspaceRootRaw(ctx, agent) {
   const cwd = sessionRootOf(agent, ctx);
   if (cwd === '') return '';
   const sessionId = sessionIdOf(agent);
@@ -152,8 +239,19 @@ function workspaceRootOf(ctx, agent) {
   return cwd;
 }
 
-function memoryRootFor(ctx, sessionId) {
-  if (sessionId === '') return '';
+/**
+ * The workspace whose SOUL.md / MEMORY.md this plugin manages, or '' when this
+ * plugin must not touch the directory at all: the QQ bot's workspace is owned
+ * by dsh-qq-workspace, which has its own switches and its own files there.
+ */
+function workspaceRootOf(ctx, agent) {
+  const root = workspaceRootRaw(ctx, agent);
+  return isQQWorkspacePath(root) ? '' : root;
+}
+
+/** Resolved memory root plus whether the QQ plugin owns it instead. */
+function memoryRootInfo(ctx, sessionId) {
+  if (sessionId === '') return { root: '', managedByQQ: false };
   let agent;
   try {
     const agents = typeof ctx?.get === 'function' ? ctx.get('agents') : undefined;
@@ -161,8 +259,9 @@ function memoryRootFor(ctx, sessionId) {
   } catch {
     agent = undefined;
   }
-  const root = workspaceRootOf(ctx, agent);
-  if (root !== '') return root;
+  const root = workspaceRootRaw(ctx, agent);
+  if (isQQWorkspacePath(root)) return { root, managedByQQ: true };
+  if (root !== '') return { root, managedByQQ: false };
   // No live agent (the session is not opened in this process yet): the registry
   // still knows which workspace owns the session, which is all memory needs.
   try {
@@ -173,11 +272,18 @@ function memoryRootFor(ctx, sessionId) {
         && workspace.path !== ''
         && Array.isArray(workspace.sessionIds)
         && workspace.sessionIds.includes(sessionId));
-      if (owner !== undefined) return owner.path;
+      if (owner !== undefined) {
+        return { root: owner.path, managedByQQ: isQQWorkspacePath(owner.path) };
+      }
     }
   } catch {
   }
-  return '';
+  return { root: '', managedByQQ: false };
+}
+
+function memoryRootFor(ctx, sessionId) {
+  const info = memoryRootInfo(ctx, sessionId);
+  return info.managedByQQ ? '' : info.root;
 }
 
 function readMemoryFile(root, file) {
@@ -293,6 +399,63 @@ function writeMemoryFile(root, kind, content) {
   return memoryFileState(resolved.real, kind);
 }
 
+function qqMemoryDir() {
+  return join(dshHome(), 'qq-workspace');
+}
+
+/**
+ * Mirror the per-file switches into dsh-qq-workspace's own settings file. That
+ * plugin scopes them to QQ sessions and reloads the file when it changes; this
+ * plugin's switch is the global one, so it is the only side that propagates a
+ * turn-off. An absent file means the plugin is not installed, which is not an
+ * error worth surfacing to the caller.
+ */
+function syncQQMemoryFiles(files) {
+  const dir = qqMemoryDir();
+  const path = join(dir, QQ_CONTEXT_FILE);
+  let stored;
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, changed: false };
+    stored = raw;
+  } catch {
+    return { ok: false, changed: false };
+  }
+  let changed = false;
+  for (const kind of MEMORY_KINDS) {
+    const key = QQ_MEMORY_SETTING_OF[kind];
+    const value = files?.[kind] === true;
+    if (stored[key] !== value) {
+      stored[key] = value;
+      changed = true;
+    }
+  }
+  if (!changed) return { ok: true, changed: false };
+  const temp = join(dir, `.context.${process.pid}.${randomUUID()}.tmp`);
+  writeFileSync(temp, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
+  renameSync(temp, path);
+  return { ok: true, changed: true };
+}
+
+function memoryLabel(files) {
+  const on = MEMORY_KINDS.filter((kind) => files?.[kind] === true).map((kind) => MEMORY_FILE_OF[kind]);
+  return on.length === 0 ? '关' : on.join(' + ');
+}
+
+/** Push a changed global switch pair into dsh-qq-workspace; never throws. */
+function propagateQQMemory(ctx, before, after) {
+  if (before?.soul === after?.soul && before?.memory === after?.memory) return false;
+  try {
+    const result = syncQQMemoryFiles(after);
+    if (result.ok !== true || result.changed !== true) return false;
+    logToHost(ctx, `[${PLUGIN_NAME}] 已同步 QQ 工作区记忆开关：${memoryLabel(after)}`);
+    return true;
+  } catch (error) {
+    logToHost(ctx, `[${PLUGIN_NAME}] 同步 QQ 工作区记忆开关失败：${error?.message ?? String(error)}`, 'warn');
+    return false;
+  }
+}
+
 function buildSoulText(file) {
   const lines = [
     '## Persistent persona (SOUL.md)',
@@ -345,39 +508,54 @@ function buildMemoryText(file) {
 
 function injectMemorySections(assembly, agent, effective, ctx) {
   if (assembly === null || typeof assembly !== 'object') return assembly;
-  if (effective?.memory !== true) return assembly;
+  const files = effective?.memoryFiles;
+  if (files?.soul !== true && files?.memory !== true) return assembly;
   const root = workspaceRootOf(ctx, agent);
   if (root === '') return assembly;
   const sections = (Array.isArray(assembly.sections) ? assembly.sections : [])
     .filter((section) => {
       // Same section identity as dsh-qq-workspace (and legacy names), or the same
-      // header text from any other memory plugin: keep exactly one copy.
-      if (section?.name === SOUL_SECTION || section?.name === MEMORY_SECTION) return false;
-      if (LEGACY_MEMORY_SECTIONS.has(section?.name)) return false;
+      // header text from any other memory plugin: keep exactly one copy. A file
+      // this config does not inject is left alone, so turning SOUL.md off here
+      // cannot strip the copy another plugin added for its own sessions.
+      const name = section?.name;
       const text = String(section?.text ?? '').trimStart();
-      return !text.startsWith(SOUL_HEADER) && !text.startsWith(MEMORY_HEADER);
+      if (files.soul === true) {
+        if (name === SOUL_SECTION || LEGACY_SOUL_SECTIONS.has(name)) return false;
+        if (text.startsWith(SOUL_HEADER)) return false;
+      }
+      if (files.memory === true) {
+        if (name === MEMORY_SECTION || LEGACY_MEMORY_SECTIONS.has(name)) return false;
+        if (text.startsWith(MEMORY_HEADER)) return false;
+      }
+      return true;
     });
-  sections.unshift({
-    name: SOUL_SECTION,
-    text: buildSoulText(readMemoryFile(root, SOUL_FILE)),
-    interpolate: false,
-  });
-  sections.push({
-    name: MEMORY_SECTION,
-    text: buildMemoryText(readMemoryFile(root, MEMORY_FILE)),
-    interpolate: false,
-  });
+  if (files.soul === true) {
+    sections.unshift({
+      name: SOUL_SECTION,
+      text: buildSoulText(readMemoryFile(root, SOUL_FILE)),
+      interpolate: false,
+    });
+  }
+  if (files.memory === true) {
+    sections.push({
+      name: MEMORY_SECTION,
+      text: buildMemoryText(readMemoryFile(root, MEMORY_FILE)),
+      interpolate: false,
+    });
+  }
   return { ...assembly, sections };
 }
 
 function defaultState() {
   return {
-    version: 3,
+    version: 4,
     updatedAt: 0,
     prompt: { mode: 'host', text: '' },
     suppress: { runtime: true, tools: true, injected: true, all: true },
     allow: emptyFilterSet(),
     deny: emptyFilterSet(),
+    memoryFiles: { soul: false, memory: false },
     memory: false,
     toolSafety: false,
     defaultMode: 'normal',
@@ -439,6 +617,30 @@ function suppressOf(raw) {
   };
 }
 
+/**
+ * Per-file memory switches. Settings written before v4 only had the single
+ * `memory` master, so a stored object without explicit booleans inherits it.
+ */
+function memoryFilesOf(raw, master) {
+  const source = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const explicit = MEMORY_KINDS.some((kind) => typeof source[kind] === 'boolean');
+  if (!explicit) return { soul: master === true, memory: master === true };
+  return { soul: source.soul === true, memory: source.memory === true };
+}
+
+function memoryEnabledCount(files) {
+  return MEMORY_KINDS.reduce((count, kind) => count + (files?.[kind] === true ? 1 : 0), 0);
+}
+
+function mergeMemoryFiles(base, patch) {
+  const next = memoryFilesOf(base, false);
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) return next;
+  for (const kind of MEMORY_KINDS) {
+    if (typeof patch[kind] === 'boolean') next[kind] = patch[kind];
+  }
+  return next;
+}
+
 function normalizeSessionId(raw) {
   const value = String(raw ?? '').trim();
   return value !== '' && value.length <= 200 ? value : '';
@@ -471,6 +673,8 @@ function normalizeCustomMode(raw) {
   if (typeof raw.id !== 'string' || !MODE_ID_RE.test(raw.id)) return null;
   const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, MAX_MODE_NAME_CHARS) : '';
   if (name === '') return null;
+  const master = raw.memory === true;
+  const memoryFiles = memoryFilesOf(raw.memoryFiles, master);
   return {
     id: raw.id,
     name,
@@ -479,7 +683,8 @@ function normalizeCustomMode(raw) {
     suppress: suppressOf(raw.suppress),
     allow: filterSetOf(raw.allow),
     deny: filterSetOf(raw.deny),
-    memory: raw.memory === true,
+    memoryFiles,
+    memory: memoryEnabledCount(memoryFiles) > 0,
     toolSafety: raw.toolSafety === true,
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
   };
@@ -549,14 +754,17 @@ function normalizeStored(raw) {
       sessions[sessionId] = { mode, updatedAt };
     }
   }
+  const storedMemory = rawVersion >= 3 && raw.memory === true;
+  const memoryFiles = memoryFilesOf(raw.memoryFiles, storedMemory);
   return {
-    version: 3,
+    version: 4,
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
     prompt: nextPrompt,
     suppress: nextSuppress,
     allow: rawVersion >= 3 ? filterSetOf(raw.allow) : emptyFilterSet(),
     deny: rawVersion >= 3 ? filterSetOf(raw.deny) : emptyFilterSet(),
-    memory: rawVersion >= 3 && raw.memory === true,
+    memoryFiles,
+    memory: memoryEnabledCount(memoryFiles) > 0,
     toolSafety: raw.toolSafety === true,
     defaultMode,
     modes,
@@ -663,32 +871,37 @@ function configForMode(state, modeValue) {
       suppress: emptySuppress(),
       allow: emptyFilterSet(),
       deny: emptyFilterSet(),
+      memoryFiles: { soul: false, memory: false },
       memory: false,
       toolSafety: false,
       pure: false,
     };
   }
   if (modeValue === 'pure') {
+    const memoryFiles = memoryFilesOf(state.memoryFiles, state.memory === true);
     return {
       promptMode: 'only',
       promptText: state.prompt.text,
       suppress: { ...state.suppress },
       allow: filterSetOf(state.allow),
       deny: filterSetOf(state.deny),
-      memory: state.memory === true,
+      memoryFiles,
+      memory: memoryEnabledCount(memoryFiles) > 0,
       toolSafety: state.toolSafety === true,
       pure: true,
     };
   }
   const custom = findCustomMode(state, modeValue);
   if (custom !== undefined) {
+    const memoryFiles = memoryFilesOf(custom.memoryFiles, custom.memory === true);
     return {
       promptMode: custom.promptMode,
       promptText: custom.promptText,
       suppress: { ...custom.suppress },
       allow: filterSetOf(custom.allow),
       deny: filterSetOf(custom.deny),
-      memory: custom.memory === true,
+      memoryFiles,
+      memory: memoryEnabledCount(memoryFiles) > 0,
       toolSafety: custom.toolSafety,
       pure: isPureConfig(custom.promptMode, custom.suppress),
     };
@@ -699,6 +912,7 @@ function configForMode(state, modeValue) {
     suppress: emptySuppress(),
     allow: emptyFilterSet(),
     deny: emptyFilterSet(),
+    memoryFiles: { soul: false, memory: false },
     memory: false,
     toolSafety: false,
     pure: false,
@@ -793,6 +1007,7 @@ function publicConfig(state) {
     suppress: { ...state.suppress },
     allow: filterSetOf(state.allow),
     deny: filterSetOf(state.deny),
+    memoryFiles: memoryFilesOf(state.memoryFiles, state.memory === true),
     memory: state.memory === true,
     toolSafety: state.toolSafety === true,
     defaultMode: state.defaultMode,
@@ -804,6 +1019,7 @@ function publicConfig(state) {
       suppress: { ...mode.suppress },
       allow: filterSetOf(mode.allow),
       deny: filterSetOf(mode.deny),
+      memoryFiles: memoryFilesOf(mode.memoryFiles, mode.memory === true),
       memory: mode.memory === true,
       toolSafety: mode.toolSafety === true,
       updatedAt: mode.updatedAt,
@@ -820,6 +1036,7 @@ function publicEffective(effective) {
     suppress: { ...effective.suppress },
     allow: filterSetOf(effective.allow),
     deny: filterSetOf(effective.deny),
+    memoryFiles: memoryFilesOf(effective.memoryFiles, effective.memory === true),
     memory: effective.memory === true,
     toolSafety: effective.toolSafety === true,
     pure: effective.pure === true,
@@ -1190,12 +1407,29 @@ function validateSettingsBody(body, state) {
   }
   const allow = body.allow === undefined ? undefined : readFilterSetInput(body.allow, 'allow');
   const deny = body.deny === undefined ? undefined : readFilterSetInput(body.deny, 'deny');
-  let memory;
+  let memoryFiles;
+  if (body.memoryFiles !== undefined) {
+    if (body.memoryFiles === null || typeof body.memoryFiles !== 'object' || Array.isArray(body.memoryFiles)) {
+      throw httpError(400, 'memoryFiles 必须是对象');
+    }
+    const next = {};
+    for (const kind of MEMORY_KINDS) {
+      if (body.memoryFiles[kind] === undefined) continue;
+      if (typeof body.memoryFiles[kind] !== 'boolean') {
+        throw httpError(400, `memoryFiles.${kind} 必须是布尔值`);
+      }
+      next[kind] = body.memoryFiles[kind];
+    }
+    if (Object.keys(next).length > 0) memoryFiles = next;
+  }
   if (body.memory !== undefined) {
     if (typeof body.memory !== 'boolean') {
       throw httpError(400, 'memory 必须是布尔值');
     }
-    memory = body.memory;
+    // The master switch is the pair: an explicit per-file patch still wins.
+    memoryFiles = memoryFiles === undefined
+      ? { soul: body.memory, memory: body.memory }
+      : memoryFiles;
   }
   let toolSafety;
   if (body.toolSafety !== undefined) {
@@ -1215,12 +1449,12 @@ function validateSettingsBody(body, state) {
     && suppress === undefined
     && allow === undefined
     && deny === undefined
-    && memory === undefined
+    && memoryFiles === undefined
     && toolSafety === undefined
     && defaultMode === undefined) {
     throw httpError(400, '没有可保存的设置字段');
   }
-  return { prompt, suppress, allow, deny, memory, toolSafety, defaultMode };
+  return { prompt, suppress, allow, deny, memoryFiles, toolSafety, defaultMode };
 }
 
 function readModeFields(body, existing) {
@@ -1232,6 +1466,7 @@ function readModeFields(body, existing) {
         suppress: emptySuppress(),
         allow: emptyFilterSet(),
         deny: emptyFilterSet(),
+        memoryFiles: { soul: false, memory: false },
         memory: false,
         toolSafety: false,
       }
@@ -1242,6 +1477,7 @@ function readModeFields(body, existing) {
         suppress: { ...existing.suppress },
         allow: filterSetOf(existing.allow),
         deny: filterSetOf(existing.deny),
+        memoryFiles: memoryFilesOf(existing.memoryFiles, existing.memory === true),
         memory: existing.memory === true,
         toolSafety: existing.toolSafety === true,
       };
@@ -1291,12 +1527,27 @@ function readModeFields(body, existing) {
   if (body.deny !== undefined) {
     next.deny = mergeFilterSet(next.deny, readFilterSetInput(body.deny, 'deny'));
   }
+  if (body.memoryFiles !== undefined) {
+    if (body.memoryFiles === null || typeof body.memoryFiles !== 'object' || Array.isArray(body.memoryFiles)) {
+      throw httpError(400, 'memoryFiles 必须是对象');
+    }
+    for (const kind of MEMORY_KINDS) {
+      if (body.memoryFiles[kind] === undefined) continue;
+      if (typeof body.memoryFiles[kind] !== 'boolean') {
+        throw httpError(400, `memoryFiles.${kind} 必须是布尔值`);
+      }
+    }
+    next.memoryFiles = mergeMemoryFiles(next.memoryFiles, body.memoryFiles);
+  }
   if (body.memory !== undefined) {
     if (typeof body.memory !== 'boolean') {
       throw httpError(400, 'memory 必须是布尔值');
     }
-    next.memory = body.memory;
+    if (body.memoryFiles === undefined) {
+      next.memoryFiles = { soul: body.memory, memory: body.memory };
+    }
   }
+  next.memory = memoryEnabledCount(next.memoryFiles) > 0;
   if (body.toolSafety !== undefined) {
     if (typeof body.toolSafety !== 'boolean') {
       throw httpError(400, 'toolSafety 必须是布尔值');
@@ -1382,15 +1633,18 @@ function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
 
 function statePayload(store, runtime, state, sessionId, ctx) {
   const effective = effectiveFor(state, sessionId);
-  const memoryRoot = memoryRootFor(ctx, sessionId);
+  const info = memoryRootInfo(ctx, sessionId);
+  const memoryRoot = info.managedByQQ ? '' : info.root;
   return {
     ok: true,
     path: store.path,
     updatedAt: state.updatedAt,
     config: publicConfig(state),
     memoryRoot,
+    memoryManagedByQQ: info.managedByQQ,
     memory: {
       root: memoryRoot,
+      managedByQQ: info.managedByQQ,
       soul: memoryFileState(memoryRoot, 'soul'),
       memory: memoryFileState(memoryRoot, 'memory'),
     },
@@ -1466,20 +1720,25 @@ function mount(ctx, cleanups) {
         const body = await readJsonBody(req);
         const current = store.get();
         const patch = validateSettingsBody(body, current);
+        const memoryFiles = patch.memoryFiles === undefined
+          ? memoryFilesOf(current.memoryFiles, current.memory === true)
+          : mergeMemoryFiles(current.memoryFiles, patch.memoryFiles);
         const next = {
           ...current,
           prompt: patch.prompt === undefined ? current.prompt : { ...current.prompt, ...patch.prompt },
           suppress: patch.suppress === undefined ? current.suppress : { ...current.suppress, ...patch.suppress },
           allow: patch.allow === undefined ? current.allow : mergeFilterSet(current.allow, patch.allow),
           deny: patch.deny === undefined ? current.deny : mergeFilterSet(current.deny, patch.deny),
-          memory: patch.memory === undefined ? current.memory : patch.memory,
+          memoryFiles,
+          memory: memoryEnabledCount(memoryFiles) > 0,
           toolSafety: patch.toolSafety === undefined ? current.toolSafety : patch.toolSafety,
           defaultMode: patch.defaultMode === undefined ? current.defaultMode : patch.defaultMode,
         };
         const saved = store.save(next);
+        propagateQQMemory(ctx, memoryFilesOf(current.memoryFiles, current.memory === true), saved.memoryFiles);
         logToHost(
           ctx,
-          `[${PLUGIN_NAME}] 设置已保存：${saved.prompt.mode}；默认模式 ${saved.defaultMode}；记忆 ${saved.memory ? '开' : '关'}；屏蔽 ${Object.entries(saved.suppress).filter(([, value]) => value === true).map(([key]) => key).join(',') || '（无）'}；例外 ${SUPPRESS_KEYS.map((key) => saved.allow[key]?.length ?? 0).reduce((left, right) => left + right, 0)} 项；单屏蔽 ${SUPPRESS_KEYS.map((key) => saved.deny[key]?.length ?? 0).reduce((left, right) => left + right, 0)} 项`,
+          `[${PLUGIN_NAME}] 设置已保存：${saved.prompt.mode}；默认模式 ${saved.defaultMode}；记忆 ${memoryLabel(saved.memoryFiles)}；屏蔽 ${Object.entries(saved.suppress).filter(([, value]) => value === true).map(([key]) => key).join(',') || '（无）'}；例外 ${SUPPRESS_KEYS.map((key) => saved.allow[key]?.length ?? 0).reduce((left, right) => left + right, 0)} 项；单屏蔽 ${SUPPRESS_KEYS.map((key) => saved.deny[key]?.length ?? 0).reduce((left, right) => left + right, 0)} 项`,
         );
         const sessionId = normalizeSessionId(url.searchParams.get('session') ?? '');
         sendJson(res, 200, statePayload(store, runtime, saved, sessionId, ctx));
@@ -1806,6 +2065,7 @@ export function apply(ctx) {
 export const __test = {
   defaultState,
   normalizeStored,
+  normalizeCustomMode,
   configForMode,
   effectiveFor,
   stripMessages,
@@ -1824,4 +2084,16 @@ export const __test = {
   writeMemoryFile,
   workspaceRootOf,
   memoryRootFor,
+  memoryFilesOf,
+  memoryEnabledCount,
+  mergeMemoryFiles,
+  validateSettingsBody,
+  readModeFields,
+  syncQQMemoryFiles,
+  publicConfig,
+  qqCwdFromPatch,
+  isQQWorkspacePath,
+  resetQQWorkspaceCache,
+  workspaceRootRaw,
+  memoryRootInfo,
 };
